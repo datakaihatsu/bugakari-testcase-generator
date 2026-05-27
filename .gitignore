@@ -2,8 +2,8 @@
 __pycache__/
 *.pyc
 
-# Claude Code設定
-.claude/
+# Claude Code local settings
+.claude/settings.local.json
 
 # 進捗報告（報告資料・バイナリ）
 進捗報告/
