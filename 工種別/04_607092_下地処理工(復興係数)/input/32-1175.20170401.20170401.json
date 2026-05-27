@@ -1,0 +1,108 @@
+﻿{"FileVersion":1,"LastUpdateDate":"2012/03/08 00:00:00","BugakariKanri":
+{"Mesho":"下地処理工 素地調整工(4種)","KanriFlags":[0,101,104],"BugakariComment":"【適用範囲】\r\nグースアスファルトを用いた橋梁における鋼床版上の基層のアスファルト舗装工事に適用する。素地調整は、ディスクサンダー等を用いて行う4種ケレンを標準作業とする。ただし、これ以外の素地調整を行う場合には別途考慮する。","MaxDaikaHyoCD":1,"MaxDaikaItemCD":2,"MaxKeisanItemCD":19,"MaxSitsumonNo":3,"MaxSerialNo":{},"MaxTabNo":
+{"2":0},"MaxPanelNo":1,"MaxBoxNo":
+{"1":3},"BugakariVersion":"21.00"},"Daika":[
+{"DaikaHyoCD":1,"DaikaTitle":"素地調整工","AtariSuryo":"100","AtariTani":"m2","Mesho":"素地調整工(グースアスファルト舗装工)"}],"DaikaItem":[
+{"DaikaItemCD":1,"SerialNo":1,"TankaCD":"32-2-101-32-21","HyoKind":201},
+{"DaikaItemCD":2,"TankaCD":"0-0-0-0-0","HyoKind":204,"Mesho":"諸雑費","TaniMesho":"％","YosoUserMD":32,"YosoCD":4}],"DaikaItemLine":[
+{"DaikaHyoCD":1,"DaikaItemCD":1,"Suryo":"1","BikoShikiLinkKeisanItemCD":19,"Column":1,"DaikaItemLineFlags":[0,5]},
+{"DaikaHyoCD":1,"DaikaItemCD":2,"DispNo":2,"Suryo":"3","Biko":"ディスクサンダー損料、消耗品、電力等","ShukeiTaishoCDs":[
+{"CD":1}],"DaikaItemLineFlags":[0]}],"KeisanItem":[
+{"KeisanItemCD":1,"Mesho":"<歩掛数値>","KeisanItemFlags":[0]},
+{"KeisanItemCD":2,"Mesho":" 橋梁塗装工","TaniMesho":"人/100m2","Expression":"4*LD","ExpMarumeCD":2,"KeisanItemFlags":[0],"VarName":"S1"},
+{"KeisanItemCD":3,"Mesho":" 100m2当り作業日数","TaniMesho":"日/100m2","Expression":"100/D","ExpMarumeCD":10,"KeisanItemFlags":[0],"VarName":"LD"},
+{"KeisanItemCD":4,"Mesho":" 日当り施工量 補正後","TaniMesho":"m2/日","Expression":"Da*K~BIG","ExpMarumeCD":60,"KeisanItemFlags":[0],"VarName":"D"},
+{"KeisanItemCD":5,"Mesho":"  日当り施工量 標準値","TaniMesho":"m2/日","Value":630.0,"KeisanItemFlags":[0],"VarName":"Da"},
+{"KeisanItemCD":6,"Mesho":" 日当り作業量補正:道路維持等作業効率低下","KeisanItemFlags":[0],"LinkUserMD":99,"LinkCD":11,"LinkKeisanItemCD":3,"VarName":"K~BIG","LastUpdate":"2013/09/20 15:21:39"},
+{"KeisanItemCD":7,"KeisanItemFlags":[0]},
+{"KeisanItemCD":8,"Mesho":"<内部変数>","KeisanItemFlags":[0]},
+{"KeisanItemCD":9,"Mesho":" 日当り作業量補正区分:道路維持等効率低下","Expression":"if(SF < 2,if(MIF_4 == -1 , MIF_4 , A~BIG),0)","KeisanItemFlags":[0],"LinkUserMD":99,"LinkCD":11,"LinkKeisanItemCD":4,"VarName":"F~BIG","LastUpdate":"2013/09/20 15:21:28"},
+{"KeisanItemCD":10,"Mesho":" 対象地区区分","Value":1.0,"KeisanItemFlags":[0],"LinkUserMD":99,"LinkCD":11,"LinkKeisanItemCD":5,"VarName":"A~BIG","LastUpdate":"2011/03/31 18:05:51"},
+{"KeisanItemCD":11,"Mesho":" 日当り施工量","TaniMesho":"m2/日","Expression":"D","KeisanItemFlags":[0],"VarName":"QPD"},
+{"KeisanItemCD":12,"Mesho":" 省庁区分","Expression":"1","KeisanItemFlags":[0],"VarName":"SF"},
+{"KeisanItemCD":13,"KeisanItemFlags":[0]},
+{"KeisanItemCD":14,"Mesho":"<上位代価から受け取る変数>","KeisanItemFlags":[0]},
+{"KeisanItemCD":15,"Mesho":" 日当り作業量補正区分","KeisanItemFlags":[0],"VarName":"MIF_4"},
+{"KeisanItemCD":16,"KeisanItemFlags":[0]},
+{"KeisanItemCD":17,"Mesho":"<レベル変数>","KeisanItemFlags":[0]},
+{"KeisanItemCD":18,"Mesho":" 日当り作業量補正区分レベル:道路維持等低下","Value":2.0,"KeisanItemFlags":[0],"LinkUserMD":99,"LinkCD":11,"LinkKeisanItemCD":7,"VarName":"LEV_A","LastUpdate":"2013/09/20 15:20:05"},
+{"KeisanItemCD":19,"Mesho":"代価表1行目:備考式","Expression":"S1","KeisanItemFlags":[0,6],"VarName":"D1B"}],"SitsumonItem":[
+{"SitsumonNo":2,"SitsumonKind":19,"Mesho":"日当り作業量補正(道路維持等作業効率低下)","SitsumonExecuteKind":2,"KikakuKeijoRec":{},"Format":"####.#","LevelVarName":"LEV_A","SitsumonFlags":[105,108],"LinkUserMD":99,"LinkCD":11,"LinkSitsumonNo":1,"LastUpdate":"2013/09/20 15:15:08","SitsumonVersion":"2017/04/01 00:00:00"},
+{"SitsumonNo":3,"SitsumonKind":205,"Mesho":"終点","KikakuKeijoRec":{},"SitsumonVersion":"2017/04/01 00:00:00","SitsumonProperty":",2=1,"}],"Sitsumon019":[
+{"SitsumonNo":2,"SitRows":[
+{"RowID":1,"Row":1,"Visible":false,"IsFixed":true},
+{"RowID":2,"Row":2,"Visible":false,"IsFixed":true},
+{"RowID":3,"Row":3,"IsFixed":true},
+{"RowID":4,"Row":4},
+{"RowID":5,"Row":5}],"SitCols":[
+{"ColID":1,"Col":1,"Visible":false,"IsFixed":true},
+{"ColID":2,"Col":2,"Visible":false,"IsFixed":true},
+{"ColID":3,"Col":3,"IsFixed":true},
+{"ColID":4,"Col":4},
+{"ColID":5,"Col":5,"ColKind":2,"VarName":"K~BIG","ColFlags":[0]}],"SitCells":[
+{"RowID":1,"ColID":1},
+{"RowID":1,"ColID":2},
+{"RowID":1,"ColID":3},
+{"RowID":1,"ColID":4},
+{"RowID":1,"ColID":5},
+{"RowID":2,"ColID":1},
+{"RowID":2,"ColID":2},
+{"RowID":2,"ColID":3},
+{"RowID":2,"ColID":4},
+{"RowID":2,"ColID":5},
+{"RowID":3,"ColID":1},
+{"RowID":3,"ColID":2},
+{"RowID":3,"ColID":3},
+{"RowID":3,"ColID":4},
+{"RowID":3,"ColID":5},
+{"RowID":4,"ColID":1},
+{"RowID":4,"ColID":2},
+{"RowID":4,"ColID":3},
+{"RowID":4,"ColID":4},
+{"RowID":4,"ColID":5},
+{"RowID":5,"ColID":1},
+{"RowID":5,"ColID":2},
+{"RowID":5,"ColID":3},
+{"RowID":5,"ColID":4},
+{"RowID":5,"ColID":5}],"SitTabRows":[
+{"RowID":1,"AutoSelectJoken":{},"HiddenJoken":{}},
+{"RowID":2,"AutoSelectJoken":{},"HiddenJoken":{}},
+{"RowID":3,"AutoSelectJoken":{},"HiddenJoken":{}},
+{"RowID":4,"AutoSelectJoken":
+{"VarName":"F~BIG","MaxKigou":3,"MaxValue":0.0},"HiddenJoken":{}},
+{"RowID":5,"AutoSelectJoken":
+{"VarName":"F~BIG","MaxKigou":3,"MaxValue":-1.0},"HiddenJoken":{}}],"SitTabCols":[
+{"ColID":1},
+{"ColID":2},
+{"ColID":3},
+{"ColID":4},
+{"ColID":5}],"SitTabCells":[
+{"RowID":1,"ColID":1},
+{"RowID":1,"ColID":2},
+{"RowID":1,"ColID":3},
+{"RowID":1,"ColID":4},
+{"RowID":1,"ColID":5},
+{"RowID":2,"ColID":1},
+{"RowID":2,"ColID":2},
+{"RowID":2,"ColID":3},
+{"RowID":2,"ColID":4},
+{"RowID":2,"ColID":5},
+{"RowID":3,"ColID":1},
+{"RowID":3,"ColID":2},
+{"RowID":3,"ColID":3},
+{"RowID":3,"ColID":4,"Value":"日当り作業量の補正\r\n(道路維持等で作業効率低下)"},
+{"RowID":3,"ColID":5,"Value":"道路維持等で作業効率が低下する日当り作業の補正\r\n(国土交通省試行)"},
+{"RowID":4,"ColID":1},
+{"RowID":4,"ColID":2},
+{"RowID":4,"ColID":3},
+{"RowID":4,"ColID":4,"Value":"無"},
+{"RowID":4,"ColID":5,"Value":"1"},
+{"RowID":5,"ColID":1},
+{"RowID":5,"ColID":2},
+{"RowID":5,"ColID":3},
+{"RowID":5,"ColID":4,"Value":"有"},
+{"RowID":5,"ColID":5,"Value":"0.8"}],"MaxRowID":5,"MaxColID":5}],"SitTab":[
+{"SitsumonNo":2,"TabMesho":"基本","TabJoken":{},"SitsumonComment":"(注)日当り作業量の補正は道路修繕工事､電線共同溝工事及び道路維持工事において､\r\n    路面切削､舗装版切断､舗装版破砕､下層路盤､上層路盤､基層､中間層､表層､切削ｵｰﾊﾞｰﾚｲ､\r\n    薄層ｶﾗｰ舗装､L型側溝､管(函)渠型側溝､ﾌﾟﾚｷｬｽﾄU型側溝､ｺﾙｹﾞｰﾄﾌﾘｭｰﾑ､自由勾配側溝､側溝蓋､\r\n    管渠､ｺﾙｹﾞｰﾄﾊﾟｲﾌﾟ､街渠桝､集水桝､ﾌﾟﾚｷｬｽﾄ街渠桝､ﾌﾟﾚｷｬｽﾄ集水桝､ﾏﾝﾎｰﾙ､ﾌﾟﾚｷｬｽﾄﾏﾝﾎｰﾙ､蓋\r\n    の場合に適用することができます｡\r\n\r\n　　※※日当り作業量の補正について※※\r\n　　日当り作業量の補正については以下を参照して下さい｡\r\n　　http://www.mlit.go.jp/common/000139689.pdf"}],"FlowTitles":[
+{"PanelNo":1,"PanelMesho":"パネル1"}],"FlowItems":[
+{"PanelNo":1,"BoxNo":1,"FlowKind":1,"SitsumonNo":2,"XPos":1,"YPos":1,"CallBox":[3],"FlowItemFlags":[0]},
+{"PanelNo":1,"BoxNo":3,"FlowKind":5,"SitsumonNo":3,"XPos":2,"YPos":1,"CallBox":[-1]}]}

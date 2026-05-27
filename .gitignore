@@ -1,0 +1,15 @@
+# Python
+__pycache__/
+*.pyc
+
+# Claude Code設定
+.claude/
+
+# 進捗報告（報告資料・バイナリ）
+進捗報告/
+
+# Gemini作業メモ
+gemini-code-*.md
+
+# 将来的にoutputを除外するときはこちらを有効化
+# 工種別/**/output/
