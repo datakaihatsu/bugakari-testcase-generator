@@ -1,0 +1,97 @@
+修正方針カテゴリ,修正方針本文,状態,マッチしたstep1行,マッチstep1 ID
+代価表,資料通りの労務と諸雑費を追加,partial,代価表/追加/TankaCD:32-2-103-33-3663,代価表:6
+計算表,代価表で追加した労務と諸雑費の行を追加,partial,計算表/追加/CD:19,計算表変数:19
+計算表,運転日数の行を追加,partial,計算表/追加/<内部変数>,計算表変数:20
+計算表,労務の計算式へ数量×運転日数を入力 / 丸め：一般労務(人),category_partial,(同カテゴリの差分あり),
+質問,運転日数の変数直接入力の質問を作成 / 規格名計上を設定,category_partial,(同カテゴリの差分あり),
+フロー,適切な位置へ配置,category_partial,(同カテゴリの差分あり),
+代価表,(step1側のみ) TankaCD:32-2-101-32-14,diff_only,代価表/追加/TankaCD:32-2-101-32-14,代価表:7
+代価表,(step1側のみ) 諸雑費,diff_only,代価表/追加/諸雑費,代価表:8
+計算表,(step1側のみ) S1,diff_only,計算表/変更/S1,計算表変数:2
+計算表,(step1側のみ) S1A,diff_only,計算表/変更/S1A,計算表変数:3
+計算表,(step1側のみ) S2,diff_only,計算表/変更/S2,計算表変数:4
+計算表,(step1側のみ) S2A,diff_only,計算表/変更/S2A,計算表変数:5
+計算表,(step1側のみ) S3,diff_only,計算表/変更/S3,計算表変数:6
+計算表,(step1側のみ) S3T,diff_only,計算表/変更/S3T,計算表変数:8
+計算表,(step1側のみ) S4,diff_only,計算表/変更/S4,計算表変数:9
+計算表,(step1側のみ) S5,diff_only,計算表/変更/S5,計算表変数:12
+計算表,(step1側のみ) S6,diff_only,計算表/変更/S6,計算表変数:15
+計算表,(step1側のみ) BHK,diff_only,計算表/変更/BHK,計算表変数:18
+計算表,(step1側のみ) DK,diff_only,計算表/追加/DK,計算表変数:21
+計算表,(step1側のみ) SF,diff_only,計算表/追加/SF,計算表変数:22
+計算表,(step1側のみ) SFK1,diff_only,計算表/追加/SFK1,計算表変数:23
+計算表,(step1側のみ) SFK2,diff_only,計算表/追加/SFK2,計算表変数:24
+計算表,(step1側のみ) D1R,diff_only,計算表/追加/D1R,計算表変数:25
+計算表,(step1側のみ) D2R,diff_only,計算表/追加/D2R,計算表変数:26
+計算表,(step1側のみ) D3R,diff_only,計算表/追加/D3R,計算表変数:27
+計算表,(step1側のみ) D4R,diff_only,計算表/追加/D4R,計算表変数:28
+計算表,(step1側のみ) D5R,diff_only,計算表/追加/D5R,計算表変数:29
+計算表,(step1側のみ) D6R,diff_only,計算表/追加/D6R,計算表変数:30
+計算表,(step1側のみ) ASVar,diff_only,計算表/追加/ASVar,計算表変数:31
+質問,(step1側のみ) 終点,diff_only,質問/変更/終点,質問No:28
+質問,(step1側のみ) BHK=1,diff_only,質問/変更/BHK=1,質問No:29
+質問,(step1側のみ) 空気圧縮機規格選択,diff_only,質問/変更/空気圧縮機規格選択,質問No:30
+質問,(step1側のみ) 資料区分,diff_only,質問/変更/資料区分,質問No:31
+質問,(step1側のみ) S4A=0.91,diff_only,質問/変更/S4A=0.91,質問No:33
+質問,(step1側のみ) 空気圧縮機延運転時間(台数分合計),diff_only,質問/変更/空気圧縮機延運転時間(台数分合計),質問No:34
+質問,(step1側のみ) S4A=0,diff_only,質問/変更/S4A=0,質問No:35
+質問,(step1側のみ) S5A=5.3,diff_only,質問/変更/S5A=5.3,質問No:36
+質問,(step1側のみ) クーリングタワー延運転時間(台数分合計),diff_only,質問/変更/クーリングタワー延運転時間(台数分合計),質問No:37
+質問,(step1側のみ) S5A=0,diff_only,質問/変更/S5A=0,質問No:38
+質問,(step1側のみ) S5T=0,diff_only,質問/変更/S5T=0,質問No:39
+質問,(step1側のみ) 運転日数,diff_only,質問/追加/運転日数,質問No:5
+質問,(step1側のみ) S5A=0,diff_only,質問/削除/S5A=0,質問No:40
+質問,(step1側のみ) S5T=0,diff_only,質問/削除/S5T=0,質問No:41
+質問,(step1側のみ) S5=代価表1枚目数量3行目,diff_only,質問/削除/S5=代価表1枚目数量3行目,質問No:42
+質問設定,(step1側のみ) S3T,diff_only,質問設定/変更/S3T,質問No:3
+質問設定,(step1側のみ) S4T,diff_only,質問設定/変更/S4T,質問No:4
+質問設定,(step1側のみ) BHK,diff_only,質問設定/変更/BHK,質問No:15
+質問設定,(step1側のみ) S4A,diff_only,質問設定/変更/S4A,質問No:18
+質問設定,(step1側のみ) S5A,diff_only,質問設定/変更/S5A,質問No:20
+質問設定,(step1側のみ) S5T,diff_only,質問設定/変更/S5T,質問No:21
+質問設定,(step1側のみ) UT,diff_only,質問設定/追加/UT,質問No:5
+選択肢,(step1側のみ) BHK=1,diff_only,選択肢/追加/BHK=1,質問No:29
+選択肢,(step1側のみ) BHK=1,diff_only,選択肢/追加/BHK=1,質問No:29
+選択肢,(step1側のみ) BHK=1,diff_only,選択肢/追加/BHK=1,質問No:29
+選択肢,(step1側のみ) BHK=1,diff_only,選択肢/追加/BHK=1,質問No:29
+選択肢,(step1側のみ) S4A=0.91,diff_only,選択肢/追加/S4A=0.91,質問No:33
+選択肢,(step1側のみ) S4A=0.91,diff_only,選択肢/追加/S4A=0.91,質問No:33
+選択肢,(step1側のみ) S4A=0.91,diff_only,選択肢/追加/S4A=0.91,質問No:33
+選択肢,(step1側のみ) S4A=0.91,diff_only,選択肢/追加/S4A=0.91,質問No:33
+選択肢,(step1側のみ) S5A=5.3,diff_only,選択肢/追加/S5A=5.3,質問No:36
+選択肢,(step1側のみ) S5A=5.3,diff_only,選択肢/追加/S5A=5.3,質問No:36
+選択肢,(step1側のみ) S5A=5.3,diff_only,選択肢/追加/S5A=5.3,質問No:36
+選択肢,(step1側のみ) S5A=5.3,diff_only,選択肢/追加/S5A=5.3,質問No:36
+選択肢,(step1側のみ) S5T=0,diff_only,選択肢/追加/S5T=0,質問No:39
+選択肢,(step1側のみ) S5T=0,diff_only,選択肢/追加/S5T=0,質問No:39
+選択肢,(step1側のみ) S5T=0,diff_only,選択肢/追加/S5T=0,質問No:39
+選択肢,(step1側のみ) S5T=0,diff_only,選択肢/追加/S5T=0,質問No:39
+選択肢,(step1側のみ) 資料区分,diff_only,選択肢/削除/資料区分,質問No:31
+選択肢,(step1側のみ) 資料区分,diff_only,選択肢/削除/資料区分,質問No:31
+選択肢,(step1側のみ) 資料区分,diff_only,選択肢/削除/資料区分,質問No:31
+選択肢,(step1側のみ) 資料区分,diff_only,選択肢/削除/資料区分,質問No:31
+選択肢,(step1側のみ) クーリングタワー延運転時間(台数分合計),diff_only,選択肢/削除/クーリングタワー延運転時間(台数分合計),質問No:37
+選択肢,(step1側のみ) クーリングタワー延運転時間(台数分合計),diff_only,選択肢/削除/クーリングタワー延運転時間(台数分合計),質問No:37
+選択肢,(step1側のみ) クーリングタワー延運転時間(台数分合計),diff_only,選択肢/削除/クーリングタワー延運転時間(台数分合計),質問No:37
+選択肢,(step1側のみ) クーリングタワー延運転時間(台数分合計),diff_only,選択肢/削除/クーリングタワー延運転時間(台数分合計),質問No:37
+フロー,(step1側のみ) 省庁区分,diff_only,フロー/変更/省庁区分,BoxNo:1
+フロー,(step1側のみ) 終点,diff_only,フロー/変更/終点,BoxNo:25
+フロー,(step1側のみ) BHK=1,diff_only,フロー/変更/BHK=1,BoxNo:28
+フロー,(step1側のみ) 歩掛補正係数,diff_only,フロー/変更/歩掛補正係数,BoxNo:29
+フロー,(step1側のみ) 空気圧縮機規格選択,diff_only,フロー/変更/空気圧縮機規格選択,BoxNo:31
+フロー,(step1側のみ) 資料区分,diff_only,フロー/変更/資料区分,BoxNo:32
+フロー,(step1側のみ) 空気圧縮機規格選択,diff_only,フロー/変更/空気圧縮機規格選択,BoxNo:33
+フロー,(step1側のみ) S4A=0.91,diff_only,フロー/変更/S4A=0.91,BoxNo:34
+フロー,(step1側のみ) 空気圧縮機延運転時間(台数分合計),diff_only,フロー/変更/空気圧縮機延運転時間(台数分合計),BoxNo:35
+フロー,(step1側のみ) S4A=0,diff_only,フロー/変更/S4A=0,BoxNo:38
+フロー,(step1側のみ) S5A=5.3,diff_only,フロー/変更/S5A=5.3,BoxNo:39
+フロー,(step1側のみ) クーリングタワー延運転時間(台数分合計),diff_only,フロー/変更/クーリングタワー延運転時間(台数分合計),BoxNo:40
+フロー,(step1側のみ) S5A=0,diff_only,フロー/変更/S5A=0,BoxNo:41
+フロー,(step1側のみ) S5T=0,diff_only,フロー/変更/S5T=0,BoxNo:42
+フロー,(step1側のみ) 運転日数,diff_only,フロー/追加/運転日数,BoxNo:8
+フロー,(step1側のみ) S3=代価表1枚目数量1行目,diff_only,フロー/削除/S3=代価表1枚目数量1行目,BoxNo:23
+フロー,(step1側のみ) S4=代価表1枚目数量2行目,diff_only,フロー/削除/S4=代価表1枚目数量2行目,BoxNo:24
+フロー,(step1側のみ) S5=代価表1枚目数量3行目,diff_only,フロー/削除/S5=代価表1枚目数量3行目,BoxNo:45
+---,---,---,---,---
+【サマリー】,修正方針項目: 6件,完全マッチ: 0,部分マッチ: 6,未マッチ: 0
+,一致率(厳密): 0%,一致率(緩和): 100%,step1のみ(過剰検出候補): 87件,

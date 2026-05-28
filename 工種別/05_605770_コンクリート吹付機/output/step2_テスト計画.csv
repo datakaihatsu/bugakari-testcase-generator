@@ -1,0 +1,12 @@
+軸ID,軸名,種別,SitsumonNo,列ラベル,変更理由,備考
+AX-001,賃料損料区分,fix,8,賃料損料区分,,SitsumonKind=19
+AX-002,供用日当り運転時間適用区分,fix,12,供用日当り運転時間適用区分,,SitsumonKind=19
+AX-003,条件選択,auto,17,条件選択(固定),自動選択(AutoSelectJoken),SitsumonKind=19
+AX-004,特殊規格の補正率有無,fix,20,特殊規格の補正率有無,,SitsumonKind=19
+AX-005,特殊規格の基礎価格加減額有無,fix,22,特殊規格の基礎価格加減額有無,,SitsumonKind=19
+AX-006,単価表数値決定方法,fix,48,単価表数値決定方法,,SitsumonKind=19
+AX-007,適用運転費,fix,49,適用運転費,,SitsumonKind=19
+AX-008,1日当り損料又は賃料数量,fix,54,1日当り損料又は賃料数量,,SitsumonKind=17
+AX-009,供用損料に対する補正,fix,83,供用損料に対する補正,,SitsumonKind=19
+AX-010,数値・規格指定表示区分,fix,131,数値・規格指定表示区分,,SitsumonKind=19
+AX-011,数値・規格指定表示区分,fix,135,数値・規格指定表示区分,,SitsumonKind=19

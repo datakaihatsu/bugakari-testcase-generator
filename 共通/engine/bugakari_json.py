@@ -6,6 +6,19 @@ import json
 import csv
 import io
 
+# Expression評価器 (Being.Core.Expressions.Parser.cs 準拠)
+from expression import (
+    Evaluator,
+    KeisanHyo,
+    ExpressionError,
+    ExternalReferenceError,
+)
+
+__all__ = [
+    'BugakariJSON', 'fmt',
+    'Evaluator', 'KeisanHyo', 'ExpressionError', 'ExternalReferenceError',
+]
+
 
 class BugakariJSON:
 

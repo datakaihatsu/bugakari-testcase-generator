@@ -1,242 +1,282 @@
 """
-③ テストケースCSV生成（シナリオベース）
-step2_提案リスト.csv → step3_テストケース.csv
+③ 列形式テストケースCSV生成 (新アーキテクチャ)
+step2_テスト計画.csv + 新JSON → step3_テストケース.csv
 
-【設計方針】
-「変更点1件→TC1件」ではなく、変更点を意味のある単位でグループ化して
-「確認シナリオ1件→TC1件」で生成する。
+【出力列】
+  テストID, テスト区分,
+  [軸1の列ラベル], [軸2の列ラベル], ...,   (軸はSitsumonNo昇順)
+  期待:S1, 期待:S2, ..., 期待:S5,         (新JSONに存在するもののみ)
+  選択肢の適切さ確認
 
-グループ化ルール:
-  - 情報行（SF固定値メモ等）は除外する
-  - 計算表の変更: まとめて1件（複数変数変更でも「計算式が変わった」は1シナリオ）
-  - 質問設定の変更: まとめて1件
-  - 選択肢の変更: テスト軸（質問名）ごとに1件
-  - 質問の変更: 変更種別（追加/変更/削除）ごとに1件
-  - フローの変更: 変更種別（追加/変更/削除）ごとに1件
-  - 代価表の変更: 1件ずつ（内容が工種依存で異なるため個別）
-  - 回帰: テスト軸が同じ提案は1件に集約
-
-出力列:
-  テストID    : TC-001, TC-002, ...
-  テスト区分   : 差分 / 回帰
-  変更概要    : 何の差分に対するテストか（複数変更はまとめて記載）
-  入力条件    : 確認に必要な入力値（シナリオ）
-  期待確認内容 : 何を確認するか
-  確認方法    : 目視確認 / 計算値確認 / フロー遷移確認
-
-使い方:
-  python generate_csv.py <proposals_csv> <output_csv>
+【ロジック】
+1. step2の各軸について、Sitsumon019から行を抽出
+   - vary: 表示可能な全行 (見出し・固定除外)
+   - fix/auto: SitTab.DefaultRowID または最初の行
+2. vary軸の cartesian product でTC列挙
+3. 各TCで KeisanHyo に各行の変数設定を投入し、S1〜S5 を評価
+4. vary軸が「新規追加質問」なら「選択肢の適切さ確認」テンプレを生成
 """
 
 import sys
 import os
 import csv
+import itertools
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'engine'))
-from bugakari_json import BugakariJSON
-
-HEADER = [
-    'テストID', 'テスト区分', '変更概要', '入力条件', '期待確認内容', '確認方法',
-]
+from bugakari_json import BugakariJSON, KeisanHyo, ExternalReferenceError, ExpressionError
+from flow_walker import FlowWalker
 
 
-def _load_proposals(path):
-    rows = []
-    with open(path, encoding='cp932', newline='') as f:
-        reader = csv.DictReader(f)
-        for row in reader:
-            rows.append(row)
-    return rows
+S_VARS = ['S1', 'S2', 'S3', 'S4', 'S5']
 
 
-def _get_change_kind(summary):
-    """差分概要文字列から変更種別（追加/削除/変更）を推定"""
-    if '新規追加' in summary or ('追加' in summary and '削除' not in summary):
-        return '追加'
-    if '削除' in summary:
-        return '削除'
-    return '変更'
+class ColumnTCGenerator:
 
+    def __init__(self, plan_csv_path, new_json_path):
+        self.new_json = BugakariJSON(new_json_path)
+        self.plan = self._load_plan(plan_csv_path)
 
-def _make_condition(axis, input_val):
-    if not axis or axis == '任意':
-        return '（任意の入力値で確認）'
-    if not input_val or input_val in ('任意', '（各選択肢）', '既存の選択肢', '（表示された質問に回答）'):
-        return f'{axis}: （表示された選択肢から回答）'
-    return f'{axis}: {input_val}'
+    def _load_plan(self, path):
+        with open(path, encoding='cp932', newline='') as f:
+            return list(csv.DictReader(f))
 
+    # ------------------------------------------------------------------
+    # Sitsumon019 から「選択可能な行」を抽出
+    # ------------------------------------------------------------------
 
-def _join_expected(props, max_items=20):
-    """複数提案の期待確認内容を箇条書きにまとめる"""
-    lines = list(dict.fromkeys(p['期待確認内容'] for p in props))
-    text = '\n'.join(f'・{e}' for e in lines[:max_items])
-    if len(lines) > max_items:
-        text += f'\n（他{len(lines) - max_items}件）'
-    return text
+    def _get_axis_rows(self, sitsumon_no):
+        """戻り値: [{'row_id', 'display', 'var_settings'(dict)}]"""
+        sit019 = self.new_json.sitsumon019_by_no.get(sitsumon_no)
+        if sit019 is None:
+            # Sitsumon017 (数値入力) など
+            return self._handle_non_019(sitsumon_no)
 
+        cells = {
+            (c['RowID'], c['ColID']): c.get('Value', '')
+            for c in sit019.get('SitTabCells', [])
+        }
+        cols = sit019.get('SitCols', [])
+        # 変数設定列: VarName を持つ列 (ColKind=2)
+        var_cols = [c for c in cols if c.get('VarName')]
+        # 表示列の動的判定: VarName 持たず Visible なカラムから、
+        # 選択可能行 (Visible=True, IsFixed=False) で値が入っているセル数が最大のものを採用
+        sit_rows = sit019.get('SitRows', [])
+        selectable_row_ids = [
+            r['RowID'] for r in sit_rows
+            if r.get('Visible', True) and not r.get('IsFixed', False)
+        ]
+        disp_col_candidates = [
+            c for c in cols
+            if c.get('Visible', True) and not c.get('VarName')
+        ]
+        disp_col = None
+        max_text_count = -1
+        for c in disp_col_candidates:
+            col_id = c.get('ColID')
+            text_count = sum(
+                1 for rid in selectable_row_ids
+                if cells.get((rid, col_id)) and str(cells.get((rid, col_id))).strip()
+            )
+            if text_count > max_text_count:
+                max_text_count = text_count
+                disp_col = col_id
+        result = []
+        for sr in sit_rows:
+            row_id = sr.get('RowID')
+            if not sr.get('Visible', True) or sr.get('IsFixed', False):
+                continue
+            display = cells.get((row_id, disp_col), '').replace('\r\n', ' ').strip() if disp_col else f'Row{row_id}'
+            var_settings = {}
+            for vc in var_cols:
+                val = cells.get((row_id, vc['ColID']))
+                if val is not None and val != '':
+                    var_settings[vc['VarName']] = val
+            result.append({
+                'row_id': row_id,
+                'display': display or f'Row{row_id}',
+                'var_settings': var_settings,
+            })
+        return result
 
-def _join_summaries(props, max_items=20):
-    """複数提案の差分概要を箇条書きにまとめる"""
-    lines = list(dict.fromkeys(p['差分概要'] for p in props))
-    text = '\n'.join(f'・{s}' for s in lines[:max_items])
-    if len(lines) > max_items:
-        text += f'\n（他{len(lines) - max_items}件）'
-    return text
+    def _handle_non_019(self, sitsumon_no):
+        """Sitsumon017 (数値入力) 等の場合: 単一値 (デフォルト) を返す"""
+        for s017 in self.new_json.data.get('Sitsumon017', []):
+            if s017.get('SitsumonNo') == sitsumon_no:
+                default = s017.get('DefaultValue', 0)
+                vname = s017.get('VarName', '')
+                tani = s017.get('TaniMesho', '')
+                return [{
+                    'row_id': 0,
+                    'display': f'{default}{tani}',
+                    'var_settings': {vname: default} if vname else {},
+                }]
+        return [{'row_id': 0, 'display': '(値なし)', 'var_settings': {}}]
 
+    def _get_default_row(self, sitsumon_no, rows):
+        """SitTab.DefaultRowID に従ったデフォルト行。無ければ最初の行"""
+        for tab in self.new_json.data.get('SitTab', []):
+            if tab.get('SitsumonNo') == sitsumon_no:
+                default_id = tab.get('DefaultRowID')
+                if default_id:
+                    for r in rows:
+                        if r['row_id'] == default_id:
+                            return r
+                break
+        return rows[0] if rows else None
 
-def generate(proposals):
-    """
-    提案リストからシナリオベースのテストケースを生成する。
-    戻り値: [HEADER] + [[テストID, テスト区分, ...], ...]
-    """
-    diff_props = [p for p in proposals if p['テスト区分'] == '差分']
-    reg_props  = [p for p in proposals if p['テスト区分'] == '回帰']
+    # ------------------------------------------------------------------
+    # 列ヘッダー構築
+    # ------------------------------------------------------------------
 
-    rows = []
-    counter = 0
+    def _build_headers(self, axes_sorted):
+        cols = ['テストID', 'テスト区分']
+        cols += [ax['列ラベル'] for ax in axes_sorted]
+        # S変数 (新JSON に存在するもののみ)
+        s_present = [v for v in S_VARS if v in self.new_json.keisan_by_varname]
+        cols += [f'期待:{v}' for v in s_present]
+        cols += ['選択肢の適切さ確認']
+        return cols, s_present
 
-    def add(kubun, summary, condition, expected, method):
-        nonlocal counter
-        counter += 1
-        rows.append([
-            f'TC-{counter:03d}', kubun, summary, condition, expected, method,
-        ])
+    # ------------------------------------------------------------------
+    # メイン
+    # ------------------------------------------------------------------
 
-    # ----------------------------------------------------------------
-    # 代価表変更: 1件ずつ（内容が異なるため個別）
-    # ----------------------------------------------------------------
-    for p in diff_props:
-        if p['根拠カテゴリ'] != '代価表':
-            continue
-        add('差分', p['差分概要'], '（任意の入力値で確認）',
-            p['期待確認内容'], '目視確認（行数・備考）')
+    def generate(self):
+        axes_sorted = sorted(self.plan, key=lambda p: int(p['SitsumonNo']))
 
-    # ----------------------------------------------------------------
-    # 計算表変更: まとめて1件
-    # ----------------------------------------------------------------
-    keisan = [p for p in diff_props if p['根拠カテゴリ'] == '計算表']
-    if keisan:
-        summary = f'計算式変更（{len(keisan)}件）: ' + '、'.join(p['差分概要'] for p in keisan)
-        expected = _join_expected(keisan)
-        notes = [p['備考'] for p in keisan if p.get('備考')]
-        if notes:
-            expected += '\n変更内容: ' + ' / '.join(notes)
-        add('差分', summary, '（任意の入力値で確認）', expected, '計算値確認')
+        vary_axes = [ax for ax in self.plan if ax['種別'] == 'vary']
+        fix_or_auto_axes = [ax for ax in self.plan if ax['種別'] in ('fix', 'auto')]
 
-    # ----------------------------------------------------------------
-    # 質問設定変更: まとめて1件
-    # ----------------------------------------------------------------
-    settings = [p for p in diff_props if p['根拠カテゴリ'] == '質問設定']
-    if settings:
-        summary = f'質問設定変更（{len(settings)}件）: ' + '、'.join(p['差分概要'] for p in settings)
-        expected = _join_expected(settings)
-        add('差分', summary, '（任意の入力値で確認）', expected, '計算値確認')
+        # vary 軸の選択肢全列挙
+        vary_row_lists = []
+        for ax in vary_axes:
+            rows = self._get_axis_rows(int(ax['SitsumonNo']))
+            vary_row_lists.append((ax, rows))
 
-    # ----------------------------------------------------------------
-    # 選択肢変更: テスト軸（質問名）ごとに1件
-    # ----------------------------------------------------------------
-    choices = [p for p in diff_props if p['根拠カテゴリ'] == '選択肢']
-    axis_groups = {}
-    for p in choices:
-        axis_groups.setdefault(p['テスト軸'], []).append(p)
-    for axis, group in axis_groups.items():
-        # 追加と削除を分けて表現
-        added   = [p for p in group if _get_change_kind(p['差分概要']) == '追加']
-        deleted = [p for p in group if _get_change_kind(p['差分概要']) == '削除']
-        # 追加された選択肢の値リスト
-        added_vals = [p['入力値'] for p in added if p['入力値'] and p['入力値'] not in ('任意',)]
-        if added_vals:
-            condition = f'{axis}: {" / ".join(added_vals)}（追加された選択肢を確認）'
+        # fix/auto 軸のデフォルト値
+        fix_chosen = {}  # 軸ID → row
+        for ax in fix_or_auto_axes:
+            rows = self._get_axis_rows(int(ax['SitsumonNo']))
+            fix_chosen[ax['軸ID']] = self._get_default_row(int(ax['SitsumonNo']), rows)
+
+        # cartesian product (vary が無ければ 1TC)
+        if vary_row_lists:
+            combos = list(itertools.product(*[rs for _, rs in vary_row_lists]))
         else:
-            condition = _make_condition(axis, None)
-        expected_parts = []
-        if added:
-            expected_parts.append('【追加】' + '、'.join(p['差分概要'] for p in added))
-        if deleted:
-            expected_parts.append('【削除】' + '、'.join(p['差分概要'] for p in deleted))
-        expected = '\n'.join(expected_parts)
-        summary = f'選択肢変更（{len(group)}件）: {axis}'
-        add('差分', summary, condition, expected, '目視確認（選択肢表示）')
+            combos = [tuple()]
 
-    # ----------------------------------------------------------------
-    # 質問変更: 変更種別（追加/変更/削除）ごとに1件
-    # ----------------------------------------------------------------
-    sitsumons = [p for p in diff_props if p['根拠カテゴリ'] == '質問']
-    _add_by_kind(sitsumons, '質問', '目視確認（質問・選択肢表示）', add)
+        headers, s_present = self._build_headers(axes_sorted)
+        out_rows = []
 
-    # ----------------------------------------------------------------
-    # フロー変更: 変更種別（追加/変更/削除）ごとに1件
-    # ----------------------------------------------------------------
-    flows = [p for p in diff_props if p['根拠カテゴリ'] == 'フロー']
-    _add_by_kind(flows, 'フロー', 'フロー遷移確認', add)
+        # === Baseline scope: vary無しで全パスを通り、全変数のデフォルト値を確定 ===
+        baseline_walker = FlowWalker(self.new_json)
+        baseline_walker.walk()
+        baseline_scope = dict(baseline_walker.hyo._user_inputs)
 
-    # ----------------------------------------------------------------
-    # 回帰テスト: テスト軸が同じ提案は1件に集約
-    # ----------------------------------------------------------------
-    seen_axes = set()
-    for p in reg_props:
-        axis = p['テスト軸']
-        if axis in seen_axes:
-            continue
-        seen_axes.add(axis)
-        condition = _make_condition(axis, p['入力値'])
-        add('回帰', p['差分概要'], condition, p['期待確認内容'], '計算値確認')
+        # S 変数 → 代価表行番号 のマップ (S1→1, S2→2, ...)
+        # 慣習: 代価表行N の数量変数 = S{N}。汎用に書くなら DaikaItemLine.BikoShikiLinkKeisanItemCD →
+        #       KeisanItem.VarName を辿ってもよいが、現状は番号一致で十分。
+        s_to_row = {f'S{i}': i for i in range(1, 10)}
 
-    return [HEADER] + rows
+        for tc_idx, combo in enumerate(combos, 1):
+            tc_id = f'TC-{tc_idx:03d}'
+
+            chosen_rows_by_ax = {}  # 軸ID → row (表示用)
+            for ax_id, row in fix_chosen.items():
+                if row is None:
+                    continue
+                chosen_rows_by_ax[ax_id] = row
+            for (ax, _), chosen_row in zip(vary_row_lists, combo):
+                chosen_rows_by_ax[ax['軸ID']] = chosen_row
+
+            # === Baseline scope を起点に KeisanHyo を構築 ===
+            hyo = KeisanHyo(self.new_json.data.get('KeisanItem', []))
+            for vname, val in baseline_scope.items():
+                try:
+                    hyo.set_input(vname, val)
+                except Exception:
+                    pass
+
+            # === vary軸の変数だけを上書き ===
+            for (ax, _), chosen_row in zip(vary_row_lists, combo):
+                for vname, val in chosen_row['var_settings'].items():
+                    try:
+                        hyo.set_input(vname, val)
+                    except Exception:
+                        pass
+
+            # === TC専用 walker: vary軸選択で代価表行フラグを取得 ===
+            #   行フラグ=0 の S* は代価表に表示されない → 空欄にする
+            tc_vary_sels = {}
+            for (ax, _), chosen_row in zip(vary_row_lists, combo):
+                tc_vary_sels[int(ax['SitsumonNo'])] = chosen_row['row_id']
+            tc_walker = FlowWalker(self.new_json, vary_selections=tc_vary_sels)
+            tc_walk = tc_walker.walk()
+            daika_flags = tc_walk.get('daika_row_flags', {})
+
+            # 行データ
+            row_data = [tc_id, '差分']
+            for ax in axes_sorted:
+                row = chosen_rows_by_ax.get(ax['軸ID'])
+                row_data.append(row['display'] if row else '')
+
+            # 期待値 S1..S5
+            for v in s_present:
+                # 代価表行フラグ=0 なら 該当 S* は代価表に出ない → 空欄
+                row_no = s_to_row.get(v)
+                if row_no is not None:
+                    flag = daika_flags.get((1, row_no))  # sheet=1 を見る
+                    if flag is not None and flag == 0:
+                        row_data.append('')
+                        continue
+                try:
+                    val = hyo.value(v)
+                    row_data.append(self._fmt_decimal(val))
+                except ExternalReferenceError:
+                    row_data.append('（外部単価依存）')
+                except ExpressionError:
+                    row_data.append('（評価不能）')
+                except Exception as e:
+                    row_data.append(f'（エラー: {e.__class__.__name__}）')
+
+            # 選択肢の適切さ確認
+            checks = []
+            for (ax, _), chosen_row in zip(vary_row_lists, combo):
+                reason = ax.get('変更理由', '')
+                if '新規追加質問' in reason:
+                    checks.append(f'{ax["軸名"]}（2026年新規追加）')
+                    checks.append(f'・「{chosen_row["display"]}」と表示されているが、外部設計と正しいか')
+                elif '選択肢追加' in reason:
+                    checks.append(f'{ax["軸名"]}（選択肢追加）')
+                    checks.append(f'・「{chosen_row["display"]}」と表示されているが、外部設計と正しいか')
+            row_data.append('\n'.join(checks))
+
+            out_rows.append(row_data)
+
+        return [headers] + out_rows
+
+    @staticmethod
+    def _fmt_decimal(v):
+        s = str(v)
+        if '.' in s:
+            s = s.rstrip('0').rstrip('.')
+            if not s:
+                s = '0'
+        return s
 
 
-def _add_by_kind(props, cat_label, default_method, add_fn):
-    """
-    変更種別（追加/変更/削除）でグループ化し、種別ごとに1件のTCを生成する。
-    追加/削除はリスト形式で列挙。変更は変更後の状態の確認。
-    """
-    kind_groups = {'追加': [], '変更': [], '削除': []}
-    for p in props:
-        kind = _get_change_kind(p['差分概要'])
-        kind_groups[kind].append(p)
-
-    for kind in ('追加', '変更', '削除'):
-        group = kind_groups[kind]
-        if not group:
-            continue
-        count = len(group)
-
-        if kind == '追加':
-            summary = f'{cat_label}追加（{count}件）'
-            condition = '追加された項目を含む操作を実施して確認'
-            expected = f'以下が新規追加されていること:\n' + _join_summaries(group)
-        elif kind == '削除':
-            summary = f'{cat_label}削除（{count}件）'
-            condition = '削除された項目の操作経路を確認'
-            expected = f'以下が削除されていること:\n' + _join_summaries(group)
-        else:
-            summary = f'{cat_label}変更（{count}件）'
-            condition = '変更された項目を含む操作を実施して確認'
-            expected = f'以下の変更が正しく反映されていること:\n'
-            for p in group[:20]:
-                expected += f'・{p["差分概要"]}: {p["期待確認内容"]}\n'
-            if count > 20:
-                expected += f'（他{count - 20}件）'
-            expected = expected.rstrip()
-
-        add_fn('差分', summary, condition, expected, default_method)
-
-
-def run(proposals_csv_path, output_path):
-    proposals = _load_proposals(proposals_csv_path)
-    rows = generate(proposals)
-
+def run(plan_csv_path, new_json_path, output_path):
+    gen = ColumnTCGenerator(plan_csv_path, new_json_path)
+    rows = gen.generate()
     BugakariJSON.write_csv(rows, output_path)
-
-    diff_count = sum(1 for r in rows[1:] if r[1] == '差分')
-    reg_count  = sum(1 for r in rows[1:] if r[1] == '回帰')
-    total = len(rows) - 1
+    n = len(rows) - 1
+    cols = len(rows[0]) if rows else 0
     print(f'テストケースCSV生成完了: {output_path}')
-    print(f'  合計: {total}件（差分{diff_count} / 回帰{reg_count}）')
+    print(f'  TC件数: {n} / 列数: {cols}')
 
 
 if __name__ == '__main__':
-    if len(sys.argv) < 3:
-        print('Usage: python generate_csv.py <proposals_csv> <output_csv>')
+    if len(sys.argv) < 4:
+        print('Usage: python generate_csv.py <plan_csv> <new_json> <output_csv>')
         sys.exit(1)
-    run(sys.argv[1], sys.argv[2])
+    run(sys.argv[1], sys.argv[2], sys.argv[3])

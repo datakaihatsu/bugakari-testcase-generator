@@ -1,12 +1,16 @@
 """
 歩掛JSON テストケース生成パイプライン
-①差分抽出 → ②テスト提案 → ③テストケースCSV生成
+①差分抽出 → ①.5 修正方針乖離チェック → ②テスト計画 → ③テストケースCSV生成
 
 使い方:
   python pipeline.py <old_json> <new_json> <output_dir>
 
 例:
   python pipeline.py 工種別/03_.../input/old.json 工種別/03_.../input/new.json 工種別/03_.../output
+
+【修正方針.txt の探索】
+  <new_json と同じディレクトリ>/修正方針.txt があれば、①.5 乖離チェックを実行。
+  無ければスキップ。
 """
 
 import sys
@@ -14,10 +18,12 @@ import os
 
 BASE = os.path.dirname(__file__)
 sys.path.insert(0, os.path.join(BASE, 'step1_diff'))
+sys.path.insert(0, os.path.join(BASE, 'step1_5_check'))
 sys.path.insert(0, os.path.join(BASE, 'step2_proposals'))
 sys.path.insert(0, os.path.join(BASE, 'step3_csv'))
 
 from extract_diff import run as run_step1
+from check_alignment import run as run_step1_5
 from generate_proposals import run as run_step2
 from generate_csv import run as run_step3
 
@@ -33,17 +39,25 @@ def run_pipeline(old_json, new_json, output_dir):
 
     print()
     print('=' * 50)
-    print('② テスト提案リスト生成')
+    print('①.5 修正方針との乖離チェック')
     print('=' * 50)
-    step2_out = os.path.join(output_dir, 'step2_提案リスト.csv')
+    intent_path = os.path.join(os.path.dirname(new_json), '修正方針.txt')
+    step1_5_out = os.path.join(output_dir, 'step1.5_乖離チェック.csv')
+    run_step1_5(intent_path, step1_out, step1_5_out)
+
+    print()
+    print('=' * 50)
+    print('② テスト計画生成')
+    print('=' * 50)
+    step2_out = os.path.join(output_dir, 'step2_テスト計画.csv')
     run_step2(step1_out, new_json, step2_out, old_json)
 
     print()
     print('=' * 50)
-    print('③ テストケースCSV生成')
+    print('③ テストケースCSV生成 (列形式)')
     print('=' * 50)
     step3_out = os.path.join(output_dir, 'step3_テストケース.csv')
-    run_step3(step2_out, step3_out)
+    run_step3(step2_out, new_json, step3_out)
 
 
 if __name__ == '__main__':

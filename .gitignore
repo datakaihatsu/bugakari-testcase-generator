@@ -13,3 +13,10 @@ gemini-code-*.md
 
 # 将来的にoutputを除外するときはこちらを有効化
 # 工種別/**/output/
+
+# 積算ソフトの参照ソース (機密・初回参照のみ)
+共通/source_ref/
+
+# IDE
+.vscode/
+*.code-workspace

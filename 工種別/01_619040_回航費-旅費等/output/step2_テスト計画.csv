@@ -1,0 +1,14 @@
+軸ID,軸名,種別,SitsumonNo,列ラベル,変更理由,備考
+AX-001,目的地までの船員一人当りの交通費,fix,1,目的地までの船員一人当りの交通費,,SitsumonKind=17
+AX-002,宿泊区分,fix,2,宿泊区分,,SitsumonKind=19
+AX-003,移動期間の宿泊日数,fix,3,移動期間の宿泊日数,,SitsumonKind=17
+AX-004,宿泊手当区分,fix,7,宿泊手当区分,,SitsumonKind=19
+AX-005,宿泊費,fix,10,宿泊費,,SitsumonKind=17
+AX-006,都道府県区分,fix,14,都道府県区分,,SitsumonKind=19
+AX-007,作業船の選択,fix,15,作業船の選択,,SitsumonKind=19
+AX-008,ポンプ浚渫船の労務,fix,17,ポンプ浚渫船の労務,,SitsumonKind=19
+AX-009,作業編成(ワッチ数),fix,39,作業編成(ワッチ数),,SitsumonKind=19
+AX-010,上乗り有無,fix,40,上乗り有無,,SitsumonKind=19
+AX-011,船団長計上区分,fix,51,船団長計上区分,,SitsumonKind=19
+AX-012,高級船員計上区分,fix,52,高級船員計上区分,,SitsumonKind=19
+AX-013,回航費の計上区分,fix,55,回航費の計上区分,,SitsumonKind=19
