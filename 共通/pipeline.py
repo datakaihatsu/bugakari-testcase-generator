@@ -34,7 +34,7 @@ def run_pipeline(old_json, new_json, output_dir):
     print('=' * 50)
     print('① 差分抽出')
     print('=' * 50)
-    step1_out = os.path.join(output_dir, 'step1_差分レポート.csv')
+    step1_out = os.path.join(output_dir, 'step1.0_差分レポート.csv')
     run_step1(old_json, new_json, step1_out)
 
     print()
@@ -49,14 +49,14 @@ def run_pipeline(old_json, new_json, output_dir):
     print('=' * 50)
     print('② テスト計画生成')
     print('=' * 50)
-    step2_out = os.path.join(output_dir, 'step2_テスト計画.csv')
+    step2_out = os.path.join(output_dir, 'step2.0_テスト計画.csv')
     run_step2(step1_out, new_json, step2_out, old_json)
 
     print()
     print('=' * 50)
     print('③ テストケースCSV生成 (列形式)')
     print('=' * 50)
-    step3_out = os.path.join(output_dir, 'step3_テストケース.csv')
+    step3_out = os.path.join(output_dir, 'step3.0_テストケース.csv')
     run_step3(step2_out, new_json, step3_out)
 
 
