@@ -1,16 +1,16 @@
 """
-歩掛JSON テストケース生成パイプライン (絞り込みアプローチ)
+歩掛JSON テストケース生成パイプライン
+①差分抽出 → ①.5 修正方針乖離チェック → ②テスト計画 → ③テストケースCSV生成
 
-【方式】
-- 差分の SitsumonNo を直接活用
-- 到達経路を forward 探索 (PoC で 3工種実証済み)
-- vary 候補に到達するための前段 fix 軸を自動推論
-
-【旧版】
-旧パイプライン (v1: 名称マッチ/baseline 経路) は 共通/_backup_v1/ に保管。
-
-【使い方】
+使い方:
   python pipeline.py <old_json> <new_json> <output_dir>
+
+例:
+  python pipeline.py 工種別/03_.../input/old.json 工種別/03_.../input/new.json 工種別/03_.../output
+
+【修正方針.txt の探索】
+  <new_json と同じディレクトリ>/修正方針.txt があれば、①.5 乖離チェックを実行。
+  無ければスキップ。
 """
 
 import sys
@@ -47,17 +47,17 @@ def run_pipeline(old_json, new_json, output_dir):
 
     print()
     print('=' * 50)
-    print('② テスト計画生成 (絞り込み)')
+    print('② テスト計画生成')
     print('=' * 50)
     step2_out = os.path.join(output_dir, 'step2.0_テスト計画.csv')
     run_step2(step1_out, new_json, step2_out, old_json)
 
     print()
     print('=' * 50)
-    print('③ テストケースCSV生成 (強制行ID対応)')
+    print('③ テストケースCSV生成 (列形式)')
     print('=' * 50)
     step3_out = os.path.join(output_dir, 'step3.0_テストケース.csv')
-    run_step3(step2_out, new_json, step3_out, old_json)
+    run_step3(step2_out, new_json, step3_out)
 
 
 if __name__ == '__main__':
