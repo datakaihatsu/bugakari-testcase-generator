@@ -51,13 +51,46 @@ class FlowWalker:
         """
         self.bj = bugakari_json
         self.data = bugakari_json.data
-        self.boxes = {f['BoxNo']: f for f in self.data.get('FlowItems', [])}
+        # レベル変数==1 で「閉じた」質問 (UI 非表示で自動確定) の記録
+        self.closed_sitsumons = set()
+        # パネル対応: ボックスを (PanelNo, BoxNo) で管理 (複数パネルで BoxNo が衝突するため)
+        self.boxes = {}
+        for f in self.data.get('FlowItems', []):
+            self.boxes[(f.get('PanelNo', 1), f['BoxNo'])] = f
+        # 各パネルの開始ボックス (Flags=[0] があればそれ、無ければ最小BoxNo)
+        self.panel_start = {}
+        for f in self.data.get('FlowItems', []):
+            pn = f.get('PanelNo', 1)
+            flags = f.get('FlowItemFlags', [])
+            if isinstance(flags, list) and 0 in flags and pn not in self.panel_start:
+                self.panel_start[pn] = f['BoxNo']
+        for (pn, bn) in self.boxes:
+            if pn not in self.panel_start:
+                self.panel_start[pn] = min(b for (q, b) in self.boxes if q == pn)
+        # PanelMesho → PanelNo (フロー切替の解決用)
+        self.panel_by_mesho = {}
+        for t in self.data.get('FlowTitles', []):
+            m = t.get('PanelMesho')
+            if m:
+                self.panel_by_mesho[m] = t.get('PanelNo')
         self.vary_selections = vary_selections or {}
         self.s019 = bugakari_json.sitsumon019_by_no
 
         # KeisanHyo (var設定の伝搬を扱うために mutate していく)
         # strict_undefined=True: 親から渡される変数等が未確定なら AutoSelect 評価でエラー→skip
         self.hyo = KeisanHyo(self.data.get('KeisanItem', []), strict_undefined=True)
+        # 環境前提値: O~Sys(積算システム) は SekisanEnv 連動変数で、実行環境では 1。
+        #   JSON 内に Value/Expression が無い場合のみシードする (06 購入土 ZK=if(O~Sys==1,1,..)
+        #   が実機で 1 → 「計上する」自動確定、の再現に必要)。
+        _osys_defined = any(
+            k.get('VarName') == 'O~Sys' and (k.get('Value') is not None or k.get('Expression'))
+            for k in self.data.get('KeisanItem', [])
+        )
+        if not _osys_defined:
+            try:
+                self.hyo.set_input('O~Sys', 1)
+            except Exception:
+                pass
         # 各 Sitsumon でどう行を選んだか ('auto', 'vary', 'default', 'first')
         self.row_sources = {}
 
@@ -66,11 +99,23 @@ class FlowWalker:
     # ------------------------------------------------------------------
 
     def find_start(self):
+        """主流フロー(デフォルト)の開始位置 (PanelNo, BoxNo) を返す。
+        Flags=[0] のうち最小 PanelNo (=主流パネル) を採用。"""
+        cands = []
         for f in self.data.get('FlowItems', []):
             flags = f.get('FlowItemFlags', [])
             if isinstance(flags, list) and 0 in flags:
-                return f
+                cands.append((f.get('PanelNo', 1), f['BoxNo']))
+        if cands:
+            cands.sort()
+            return cands[0]
         return None
+
+    def _resolve_switch_panel(self, mesho):
+        """「フロー切替:X」 の X を PanelMesho と照合し対象 PanelNo を返す。"""
+        m = mesho or ''
+        x = m.split(':', 1)[1].strip() if ':' in m else m.strip()
+        return self.panel_by_mesho.get(x)
 
     # ------------------------------------------------------------------
     # 走査 (単一パス)
@@ -93,50 +138,65 @@ class FlowWalker:
         sit_selections = {}
         visit_count = 0
 
-        current_box_no = start['BoxNo']
+        # パネル対応走査:
+        #   主流パネル(Panel1)から開始。「フロー切替」ボックスで対象パネルを
+        #   サブルーチン呼び出しし、サブパネルの終点で呼び出し元へ復帰する。
+        cur_panel, current_box_no = start
+        call_stack = []  # [(復帰先パネル, 復帰先BoxNo)]
         while current_box_no is not None:
             visit_count += 1
             if visit_count > self.MAX_VISITS:
                 break
 
-            box = self.boxes.get(current_box_no)
+            box = self.boxes.get((cur_panel, current_box_no))
             if box is None:
+                if call_stack:
+                    cur_panel, current_box_no = call_stack.pop()
+                    continue
                 break
 
             kind = box.get('FlowKind', 0)
             cb_all = box.get('CallBox', [])
-
-            # 真の終端: CallBox が空、または -1 のみ
-            #   (32-4527 では FlowKind=4 でも CallBox=[14] のような中間ノードがある)
-            if not cb_all or all(c < 0 for c in cb_all):
-                break
-
             sit_no = box.get('SitsumonNo')
+            sit_item = self.bj.sitsumon_by_no.get(sit_no, {}) if sit_no else {}
+
+            # フロー切替 (SitsumonKind=119): 対象パネルをサブルーチン呼び出し
+            if sit_item.get('SitsumonKind') == 119:
+                target = self._resolve_switch_panel(sit_item.get('Mesho', ''))
+                ret_box = cb_all[0] if (cb_all and cb_all[0] >= 0) else None
+                if target is not None and target in self.panel_start and target != cur_panel:
+                    if ret_box is not None:
+                        call_stack.append((cur_panel, ret_box))
+                    cur_panel = target
+                    current_box_no = self.panel_start[target]
+                    continue
+                current_box_no = ret_box
+                if current_box_no is None and call_stack:
+                    cur_panel, current_box_no = call_stack.pop()
+                continue
+
+            # 終端: CallBox が空 or 全て負 → サブパネルなら復帰、主流なら終了
+            if not cb_all or all(c < 0 for c in cb_all):
+                if call_stack:
+                    cur_panel, current_box_no = call_stack.pop()
+                    continue
+                break
 
             if kind == 1 or kind == 2:  # Sit or Bunki
                 if sit_no:
                     visited_sits.append(sit_no)
-                    # 選択行決定
                     chosen_row = self._choose_row(sit_no)
                     if chosen_row is not None:
                         sit_selections[sit_no] = chosen_row
-                        # 変数設定 (Sitsumon019 の VarName 列)
                         self._apply_row_vars(sit_no, chosen_row)
-
                     if kind == 2:
-                        # Bunki: 選択行に対応する CallBox を辿る
                         next_box_no = self._bunki_next_box(box, sit_no, chosen_row)
                     else:
-                        # Sit: CallBox[0] へ
-                        cb = box.get('CallBox', [])
-                        next_box_no = cb[0] if cb else None
+                        next_box_no = cb_all[0] if cb_all else None
                 else:
-                    cb = box.get('CallBox', [])
-                    next_box_no = cb[0] if cb else None
-
+                    next_box_no = cb_all[0] if cb_all else None
             else:  # Command, Through, None
-                cb = box.get('CallBox', [])
-                next_box_no = cb[0] if cb else None
+                next_box_no = cb_all[0] if cb_all else None
 
             current_box_no = next_box_no
 
@@ -177,8 +237,23 @@ class FlowWalker:
         """選択行を決定。優先: vary > auto > default > 先頭
         副作用: self.row_sources[sitsumon_no] に選択経緯を記録 ('vary'/'auto'/'default'/'first')
         """
-        # 1. vary 軸として指定されていればそれ
-        if sitsumon_no in self.vary_selections:
+        # 0. レベル変数: 現在スコープで level==1 なら質問は「閉じる」
+        #    → ユーザー選択(vary)は無効で、AutoSelectJoken/デフォルトが決める。
+        #    例: 06 撤去(C=3)で LEVsk=1 → 資材計上区分が閉じ rsskH=2 で「施工費のみ」に自動確定。
+        #    開いている(0,2等)場合は従来どおり vary 優先。評価不能時は開扱い(安全側)。
+        _closed = False
+        _sit = self.bj.sitsumon_by_no.get(sitsumon_no, {})
+        _lv = _sit.get('LevelVarName')
+        if _lv:
+            try:
+                _closed = float(self.hyo.value(_lv)) == 1.0
+            except Exception:
+                _closed = False
+        if _closed:
+            self.closed_sitsumons.add(sitsumon_no)
+
+        # 1. vary 軸として指定されていればそれ (閉じている場合を除く)
+        if sitsumon_no in self.vary_selections and not _closed:
             self.row_sources[sitsumon_no] = 'vary'
             return self.vary_selections[sitsumon_no]
 
@@ -235,7 +310,11 @@ class FlowWalker:
             op = op_map.get(min_kigou, '==')
             parts.append(f'{min_val}{op}{var}')
         if max_kigou and max_val is not None:
-            op = op_map.get(max_kigou, '==')
+            # Min側の指定が無い単独の MaxKigou=3 は「==」(一致) 判定 (_joken_selects と同解釈)
+            if max_kigou == 3 and not (min_kigou and min_val is not None):
+                op = '=='
+            else:
+                op = op_map.get(max_kigou, '==')
             parts.append(f'{var}{op}{max_val}')
         return ' && '.join(parts) if parts else None
 
@@ -250,12 +329,13 @@ class FlowWalker:
         var_cols = [c for c in sit019.get('SitCols', []) if c.get('VarName')]
         if not var_cols:
             return
-        cells_map = {
-            (c['RowID'], c['ColID']): c.get('Value')
-            for c in sit019.get('SitTabCells', [])
-        }
+        # Fix B: タブ対応。複数タブ質問は現在の変数スコープ(self.hyo)で有効タブを
+        #   決め、そのタブのセル値を伝搬する (例: 04 No:3 日当り施工量 →
+        #   被災地補正なし=630 / あり=567)。J30 等のタブ判定変数は、フロー上で
+        #   先行する質問(被災地 No:1)が既に設定済み。
+        active_tab = self.bj.active_tab_no(sitsumon_no, self.hyo)
         for vc in var_cols:
-            val = cells_map.get((row_id, vc['ColID']))
+            val = self.bj.cell_value_for_tab(sit019, row_id, vc['ColID'], active_tab)
             if val is None or val == '':
                 continue
             try:

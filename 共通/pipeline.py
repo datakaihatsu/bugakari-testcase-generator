@@ -43,7 +43,7 @@ def run_pipeline(old_json, new_json, output_dir):
     print('=' * 50)
     intent_path = os.path.join(os.path.dirname(new_json), '修正方針.txt')
     step1_5_out = os.path.join(output_dir, 'step1.5_乖離チェック.csv')
-    run_step1_5(intent_path, step1_out, step1_5_out)
+    run_step1_5(intent_path, step1_out, step1_5_out, new_json, old_json)
 
     print()
     print('=' * 50)

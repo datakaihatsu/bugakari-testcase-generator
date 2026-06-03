@@ -1,7 +1,7 @@
-﻿{"FileVersion":1,"LastUpdateDate":"2026/05/12 00:00:00","BugakariKanri":
-{"Mesho":"土のう積工","KanriFlags":[0,101,104],"BugakariComment":"【適用範囲】\r\n簡易な仮締切工に適用するものとし、仕拵、積立、撤去の各作業よりなるものとする。","MaxDaikaHyoCD":1,"MaxDaikaItemCD":5,"MaxKeisanItemCD":52,"MaxSitsumonNo":17,"MaxSerialNo":{},"MaxTabNo":
-{"1":0,"10":0,"4":0,"2":1,"3":1,"9":0,"8":0,"11":0,"6":0,"7":0,"12":0,"13":0,"14":1},"MaxPanelNo":2,"MaxBoxNo":
-{"1":19,"2":4},"BugakariVersion":"68.00"},"Daika":[
+﻿{"FileVersion":1,"LastUpdateDate":"2026/05/27 00:00:00","BugakariKanri":
+{"Mesho":"土のう積工","KanriFlags":[0,101,104],"BugakariComment":"【適用範囲】\r\n簡易な仮締切工に適用するものとし、仕拵、積立、撤去の各作業よりなるものとする。","MaxDaikaHyoCD":1,"MaxDaikaItemCD":5,"MaxKeisanItemCD":52,"MaxSitsumonNo":18,"MaxSerialNo":{},"MaxTabNo":
+{"1":0,"10":0,"4":0,"2":1,"3":1,"9":0,"8":0,"11":0,"6":0,"5":0,"7":0,"15":0,"12":0,"13":0,"14":1},"MaxPanelNo":2,"MaxBoxNo":
+{"1":19,"2":4},"BugakariVersion":"69.00"},"Daika":[
 {"DaikaHyoCD":1,"DaikaTitle":"土のう積工","AtariSuryo":"10","AtariTani":"m2","Mesho":"土のう積工"}],"DaikaItem":[
 {"DaikaItemCD":4,"SerialNo":1,"TankaCD":"32-2-101-32-23","HyoKind":201},
 {"DaikaItemCD":1,"SerialNo":1,"TankaCD":"32-2-101-32-2","HyoKind":201},
@@ -76,15 +76,18 @@
 {"SitsumonNo":8,"SitsumonKind":19,"Mesho":"資材計上区分","SitsumonExecuteKind":2,"KikakuKeijoRec":{},"Format":"##","LevelVarName":"LEVsk","SitsumonFlags":[105,108],"SitsumonVersion":"2020/07/31 17:18:44"},
 {"SitsumonNo":11,"SitsumonKind":19,"Mesho":"購入土計上区分","SitsumonExecuteKind":2,"KikakuKeijoRec":{},"Format":"####.###","LevelVarName":"LEVzk","SitsumonFlags":[105,108],"SitsumonVersion":"2024/03/04 23:52:30"},
 {"SitsumonNo":6,"SitsumonKind":8,"Mesho":"材料の選択(土砂)","SitsumonExecuteKind":2,"KikakuKeijoRec":{},"Format":"#######.###","SitsumonFlags":[105],"SitsumonVersion":"2024/03/04 23:52:30"},
-{"SitsumonNo":7,"SitsumonKind":8,"Mesho":"材料の選択(土のう)","SitsumonExecuteKind":2,"KikakuKeijoRec":{},"Format":"#######.###","SitsumonFlags":[105],"SitsumonVersion":"2024/03/04 23:52:30"},
-{"SitsumonNo":15,"SitsumonKind":119,"Mesho":"フロー切替:適用労務切替(山林砂防工)","SitsumonExecuteKind":2,"KikakuKeijoRec":{},"SitsumonFlags":[105],"SitsumonVersion":"2017/04/01 00:00:00"},
+{"SitsumonNo":5,"SitsumonKind":19,"Mesho":"土のう種類","SitsumonExecuteKind":2,"KikakuKeijoRec":{},"Format":"##","SitsumonFlags":[105,108],"SitsumonVersion":"2026/05/29 01:26:54"},
+{"SitsumonNo":7,"SitsumonKind":8,"Mesho":"材料の選択(土のう袋(普通))","SitsumonExecuteKind":2,"KikakuKeijoRec":{},"Format":"#######.###","SitsumonFlags":[105],"SitsumonVersion":"2026/05/29 01:26:54"},
+{"SitsumonNo":15,"SitsumonKind":8,"Mesho":"材料の選択(土のう袋(耐候性))","SitsumonExecuteKind":2,"KikakuKeijoRec":{},"Format":"#######.###","SitsumonFlags":[105],"SitsumonVersion":"2026/05/29 01:26:54"},
+{"SitsumonNo":16,"SitsumonKind":119,"Mesho":"フロー切替:適用労務切替(山林砂防工)","SitsumonExecuteKind":2,"KikakuKeijoRec":{},"SitsumonFlags":[105],"SitsumonVersion":"2017/04/01 00:00:00"},
 {"SitsumonNo":12,"SitsumonKind":19,"Mesho":"適用労務選択方法の切替","SitsumonExecuteKind":2,"KikakuKeijoRec":{},"Format":"####.###","SitsumonFlags":[105,108],"LinkUserMD":99,"LinkCD":127,"LinkSitsumonNo":1,"LastUpdate":"2015/10/29 16:57:09","SitsumonVersion":"2026/05/15 00:16:45"},
 {"SitsumonNo":13,"SitsumonKind":19,"Mesho":"労務費の適用","SitsumonExecuteKind":1,"KikakuKeijoRec":{},"Format":"####.##","SitsumonFlags":[100,105,108],"LinkUserMD":99,"LinkCD":127,"LinkSitsumonNo":4,"LastUpdate":"2016/03/17 20:15:33","SitsumonVersion":"2026/05/15 00:16:45"},
 {"SitsumonNo":14,"SitsumonKind":19,"Mesho":"労務費の適用","SitsumonExecuteKind":1,"KikakuKeijoRec":{},"Format":"####.##","SitsumonFlags":[100,105,108],"LinkUserMD":99,"LinkCD":127,"LinkSitsumonNo":5,"LastUpdate":"2016/05/19 18:49:38","SitsumonVersion":"2026/05/15 00:16:45"},
-{"SitsumonNo":17,"SitsumonKind":205,"Mesho":"終点","KikakuKeijoRec":{},"SitsumonVersion":"2017/04/01 00:00:00","SitsumonProperty":",2=2,"},
-{"SitsumonNo":16,"SitsumonKind":205,"Mesho":"終点","KikakuKeijoRec":{},"SitsumonVersion":"2017/04/01 00:00:00","SitsumonProperty":",2=1,"}],"Sitsumon008":[
+{"SitsumonNo":18,"SitsumonKind":205,"Mesho":"終点","KikakuKeijoRec":{},"SitsumonVersion":"2017/04/01 00:00:00","SitsumonProperty":",2=2,"},
+{"SitsumonNo":17,"SitsumonKind":205,"Mesho":"終点","KikakuKeijoRec":{},"SitsumonVersion":"2017/04/01 00:00:00","SitsumonProperty":",2=1,"}],"Sitsumon008":[
 {"SitsumonNo":6,"DefaultTankaCD":"32-1-102-33-63090","DaikaItemCD":2,"KeijoSakiTankaCD":"32-1-102-32-3560","KeijoSakiSerialNo":1},
-{"SitsumonNo":7,"DefaultTankaCD":"32-1-102-33-63477","DaikaItemCD":3,"KeijoSakiTankaCD":"32-1-102-32-8555","KeijoSakiSerialNo":1}],"Sitsumon019":[
+{"SitsumonNo":7,"DefaultTankaCD":"32-1-102-33-63477","DaikaItemCD":3,"KeijoSakiTankaCD":"32-1-102-32-8555","KeijoSakiSerialNo":1},
+{"SitsumonNo":15,"DefaultTankaCD":"32-1-102-33-63477","DaikaItemCD":3,"KeijoSakiTankaCD":"32-1-102-32-8555","KeijoSakiSerialNo":1}],"Sitsumon019":[
 {"SitsumonNo":1,"SitRows":[
 {"RowID":1,"Row":1,"Visible":false,"IsFixed":true},
 {"RowID":2,"Row":2,"Visible":false,"IsFixed":true},
@@ -850,6 +853,65 @@
 {"RowID":5,"ColID":3},
 {"RowID":5,"ColID":4,"Value":"計上しない"},
 {"RowID":5,"ColID":5,"Value":"0"}],"MaxRowID":5,"MaxColID":5},
+{"SitsumonNo":5,"SitRows":[
+{"RowID":1,"Row":1,"Visible":false,"IsFixed":true},
+{"RowID":2,"Row":2,"Visible":false,"IsFixed":true},
+{"RowID":3,"Row":3,"IsFixed":true},
+{"RowID":4,"Row":4},
+{"RowID":5,"Row":5}],"SitCols":[
+{"ColID":1,"Col":1,"Visible":false,"IsFixed":true},
+{"ColID":2,"Col":2,"Visible":false,"IsFixed":true},
+{"ColID":3,"Col":3,"IsFixed":true},
+{"ColID":4,"Col":4}],"SitCells":[
+{"RowID":1,"ColID":1},
+{"RowID":1,"ColID":2},
+{"RowID":1,"ColID":3},
+{"RowID":1,"ColID":4},
+{"RowID":2,"ColID":1},
+{"RowID":2,"ColID":2},
+{"RowID":2,"ColID":3},
+{"RowID":2,"ColID":4},
+{"RowID":3,"ColID":1},
+{"RowID":3,"ColID":2},
+{"RowID":3,"ColID":3},
+{"RowID":3,"ColID":4},
+{"RowID":4,"ColID":1},
+{"RowID":4,"ColID":2},
+{"RowID":4,"ColID":3},
+{"RowID":4,"ColID":4},
+{"RowID":5,"ColID":1},
+{"RowID":5,"ColID":2},
+{"RowID":5,"ColID":3},
+{"RowID":5,"ColID":4}],"SitTabRows":[
+{"RowID":1,"AutoSelectJoken":{},"HiddenJoken":{}},
+{"RowID":2,"AutoSelectJoken":{},"HiddenJoken":{}},
+{"RowID":3,"AutoSelectJoken":{},"HiddenJoken":{}},
+{"RowID":4,"AutoSelectJoken":{},"HiddenJoken":{}},
+{"RowID":5,"AutoSelectJoken":{},"HiddenJoken":{}}],"SitTabCols":[
+{"ColID":1},
+{"ColID":2},
+{"ColID":3},
+{"ColID":4}],"SitTabCells":[
+{"RowID":1,"ColID":1},
+{"RowID":1,"ColID":2},
+{"RowID":1,"ColID":3},
+{"RowID":1,"ColID":4},
+{"RowID":2,"ColID":1},
+{"RowID":2,"ColID":2},
+{"RowID":2,"ColID":3},
+{"RowID":2,"ColID":4},
+{"RowID":3,"ColID":1},
+{"RowID":3,"ColID":2},
+{"RowID":3,"ColID":3},
+{"RowID":3,"ColID":4,"Value":"土のう種類"},
+{"RowID":4,"ColID":1},
+{"RowID":4,"ColID":2},
+{"RowID":4,"ColID":3},
+{"RowID":4,"ColID":4,"Value":"普通"},
+{"RowID":5,"ColID":1},
+{"RowID":5,"ColID":2},
+{"RowID":5,"ColID":3},
+{"RowID":5,"ColID":4,"Value":"耐候性"}],"MaxRowID":5,"MaxColID":4},
 {"SitsumonNo":12,"SitRows":[
 {"RowID":1,"Row":1,"Visible":false,"IsFixed":true},
 {"RowID":2,"Row":2,"Visible":false,"IsFixed":true},
@@ -1066,7 +1128,7 @@
 {"RowID":5,"ColID":4,"Value":"普通作業員を適用"},
 {"RowID":5,"ColID":5,"Value":"普通作業員"},
 {"RowID":5,"ColID":6,"Value":"2"}],"MaxRowID":5,"MaxColID":6}],"Sitsumon119":[
-{"SitsumonNo":15,"CallPanelNo":2}],"SitTab":[
+{"SitsumonNo":16,"CallPanelNo":2}],"SitTab":[
 {"SitsumonNo":1,"TabMesho":"基本","TabJoken":{}},
 {"SitsumonNo":10,"TabMesho":"基本","TabJoken":{}},
 {"SitsumonNo":4,"TabMesho":"基本","TabJoken":{}},
@@ -1082,7 +1144,9 @@
 {"SitsumonNo":8,"TabMesho":"基本","TabJoken":{}},
 {"SitsumonNo":11,"TabMesho":"基本","TabJoken":{},"SitsumonComment":"(注)流用土は､現場発生の土を使用する為\r\n　　0円で計上してください"},
 {"SitsumonNo":6,"TabMesho":"基本","TabJoken":{}},
+{"SitsumonNo":5,"TabMesho":"基本","TabJoken":{}},
 {"SitsumonNo":7,"TabMesho":"基本","TabJoken":{}},
+{"SitsumonNo":15,"TabMesho":"基本","TabJoken":{}},
 {"SitsumonNo":12,"TabMesho":"基本","TabJoken":{}},
 {"SitsumonNo":13,"TabMesho":"基本","TabJoken":{}},
 {"SitsumonNo":14,"TabMesho":"ヘルプファイル参照","TabJoken":
@@ -1095,23 +1159,26 @@
 {"PanelNo":1,"BoxNo":2,"FlowKind":1,"SitsumonNo":2,"XPos":4,"YPos":1,"CallBox":[15]},
 {"PanelNo":1,"BoxNo":3,"FlowKind":2,"SitsumonNo":4,"XPos":3,"YPos":1,"CallBox":[2,4]},
 {"PanelNo":1,"BoxNo":4,"FlowKind":1,"SitsumonNo":3,"XPos":4,"YPos":2,"CallBox":[15]},
-{"PanelNo":1,"BoxNo":5,"FlowKind":1,"SitsumonNo":7,"XPos":8,"YPos":1,"CallBox":[11]},
+{"PanelNo":1,"BoxNo":5,"FlowKind":1,"SitsumonNo":7,"XPos":9,"YPos":1,"CallBox":[11]},
 {"PanelNo":1,"BoxNo":6,"FlowKind":4,"XPos":3,"YPos":3,"CallBox":[18]},
 {"PanelNo":1,"BoxNo":7,"FlowKind":2,"SitsumonNo":11,"XPos":6,"YPos":1,"CallBox":[10,9]},
-{"PanelNo":1,"BoxNo":8,"FlowKind":4,"XPos":6,"YPos":3,"CallBox":[19]},
-{"PanelNo":1,"BoxNo":9,"FlowKind":4,"XPos":7,"YPos":2,"CallBox":[5]},
-{"PanelNo":1,"BoxNo":10,"FlowKind":1,"SitsumonNo":6,"XPos":7,"YPos":1,"CallBox":[5]},
-{"PanelNo":1,"BoxNo":11,"FlowKind":3,"SitsumonNo":15,"XPos":9,"YPos":1,"CallBox":[13]},
-{"PanelNo":1,"BoxNo":13,"FlowKind":5,"SitsumonNo":16,"XPos":10,"YPos":1,"CallBox":[-1]},
-{"PanelNo":1,"BoxNo":15,"FlowKind":2,"SitsumonNo":8,"XPos":5,"YPos":1,"CallBox":[7,8]},
+{"PanelNo":1,"BoxNo":8,"FlowKind":2,"SitsumonNo":5,"XPos":8,"YPos":1,"CallBox":[5,17]},
+{"PanelNo":1,"BoxNo":9,"FlowKind":4,"XPos":7,"YPos":2,"CallBox":[8]},
+{"PanelNo":1,"BoxNo":10,"FlowKind":1,"SitsumonNo":6,"XPos":7,"YPos":1,"CallBox":[8]},
+{"PanelNo":1,"BoxNo":11,"FlowKind":3,"SitsumonNo":16,"XPos":10,"YPos":1,"CallBox":[13]},
+{"PanelNo":1,"BoxNo":13,"FlowKind":5,"SitsumonNo":17,"XPos":11,"YPos":1,"CallBox":[-1]},
+{"PanelNo":1,"BoxNo":14,"FlowKind":4,"XPos":6,"YPos":3,"CallBox":[19]},
+{"PanelNo":1,"BoxNo":15,"FlowKind":2,"SitsumonNo":8,"XPos":5,"YPos":1,"CallBox":[7,14]},
 {"PanelNo":1,"BoxNo":16,"FlowKind":2,"SitsumonNo":10,"XPos":2,"YPos":1,"CallBox":[3,6]},
+{"PanelNo":1,"BoxNo":17,"FlowKind":1,"SitsumonNo":15,"XPos":9,"YPos":2,"CallBox":[11]},
 {"PanelNo":1,"BoxNo":18,"FlowKind":1,"SitsumonNo":9,"XPos":4,"YPos":3,"CallBox":[15]},
-{"PanelNo":1,"BoxNo":19,"FlowKind":4,"XPos":8,"YPos":3,"CallBox":[11]},
+{"PanelNo":1,"BoxNo":19,"FlowKind":4,"XPos":9,"YPos":3,"CallBox":[11]},
 {"PanelNo":2,"BoxNo":1,"FlowKind":2,"SitsumonNo":12,"XPos":1,"YPos":1,"CallBox":[2,3],"FlowItemFlags":[0]},
 {"PanelNo":2,"BoxNo":2,"FlowKind":1,"SitsumonNo":13,"XPos":2,"YPos":1,"CallBox":[4]},
 {"PanelNo":2,"BoxNo":3,"FlowKind":1,"SitsumonNo":14,"XPos":2,"YPos":2,"CallBox":[4]},
-{"PanelNo":2,"BoxNo":4,"FlowKind":5,"SitsumonNo":17,"XPos":3,"YPos":1,"CallBox":[-1]}],"KikakuKeijoGaia9":[
+{"PanelNo":2,"BoxNo":4,"FlowKind":5,"SitsumonNo":18,"XPos":3,"YPos":1,"CallBox":[-1]}],"KikakuKeijoGaia9":[
 {"SitsumonNo":1,"InfoKind":1,"Number":101,"DataStart":1,"DataLen":8,"KikakuStart":201},
 {"SitsumonNo":2,"InfoKind":1,"Number":101,"DataStart":1,"DataLen":14,"KikakuStart":220},
 {"SitsumonNo":3,"InfoKind":1,"Number":101,"DataStart":1,"DataLen":20,"KikakuStart":220},
+{"SitsumonNo":5,"InfoKind":1,"Number":101,"DataStart":1,"DataLen":8,"KikakuStart":241},
 {"SitsumonNo":9,"InfoKind":1,"Number":101,"DataStart":1,"DataLen":14,"KikakuStart":220}]}

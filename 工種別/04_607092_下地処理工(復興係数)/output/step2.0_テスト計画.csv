@@ -1,4 +1,3 @@
 軸ID,軸名,種別,SitsumonNo,列ラベル,変更理由,備考,強制行ID
 AX-001,日当り作業量補正(道路維持等作業効率低下),fix,2,日当り作業量補正(道路維持等作業効率低下),,SitsumonKind=19,
-AX-002,日当り作業量補正(被災地),vary,1,日当り作業量補正(被災地),新規追加質問,SitsumonKind=19,
-AX-003,日当り施工量,vary,3,日当り施工量,選択肢追加,SitsumonKind=19,
+AX-002,日当り施工量,auto,3,日当り施工量(固定),"デフォルト実行 (SitsumonExecuteKind=1, SekisanEnv連動なし)",SitsumonKind=19,

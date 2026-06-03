@@ -1,3 +1,9 @@
 軸ID,軸名,種別,SitsumonNo,列ラベル,変更理由,備考,強制行ID
-AX-001,適用労務選択方法の切替,vary,12,適用労務選択方法の切替,選択肢追加,SitsumonKind=19,
-AX-002,労務費の適用,vary,14,労務費の適用,新規追加質問,SitsumonKind=19,
+AX-001,作業区分,fix,1,作業区分,,SitsumonKind=19,
+AX-002,作業内容,vary,2,作業内容,選択肢削除,SitsumonKind=19,
+AX-003,資材計上区分,vary,8,資材計上区分,業務ルール: 資材計上区分の切替が代価表数量に影響,SitsumonKind=19,
+AX-004,購入土計上区分,auto,11,購入土計上区分(固定),自動選択(AutoSelectJoken),SitsumonKind=19,
+AX-005,材料の選択(土砂),fix,6,材料の選択(土砂),,SitsumonKind=8,
+AX-006,土のう種類,vary,5,土のう種類,新規追加質問,SitsumonKind=19,
+AX-007,作業内容,vary,3,作業内容,選択肢削除,SitsumonKind=19,
+AX-008,労務費の適用,vary,14,労務費の適用,新規追加質問,SitsumonKind=19,

@@ -57,8 +57,46 @@ class DiffExtractor:
         rows.extend(self._diff_sitsumon014())
         rows.extend(self._diff_sitsumon017())
         rows.extend(self._diff_sitsumon019())
+        rows.extend(self._diff_default_row())
         rows.extend(self._diff_flow())
         rows.sort(key=lambda r: (CATEGORY_ORDER.get(r[0], 99), CHANGE_ORDER.get(r[1], 99)))
+        return rows
+
+    # ------------------------------------------------------------------
+    # 初期値変更（SitTab.DefaultRowID の旧新比較）
+    #   例: 05 大型ブレーカ排ガス選択 第1次→第3次 (修正方針の「初期値変更」)。
+    #   選択肢の追加/削除ではないため従来は未検出だった。
+    # ------------------------------------------------------------------
+
+    def _diff_default_row(self):
+        rows = []
+
+        def defmap(bj):
+            m = {}
+            for t in bj.data.get('SitTab', []):
+                if t.get('TabNo') is None and t.get('DefaultRowID') is not None:
+                    m[t.get('SitsumonNo')] = t.get('DefaultRowID')
+            return m
+
+        def row_text(bj, no, row_id):
+            s019 = bj.sitsumon019_by_no.get(no)
+            if not s019:
+                return f'Row{row_id}'
+            cells = {(c['RowID'], c['ColID']): c.get('Value') for c in s019.get('SitTabCells', [])}
+            mc = max((c['ColID'] for c in s019.get('SitCols', [])), default=1)
+            v = cells.get((row_id, mc))
+            return str(v).replace('\r\n', ' ').strip() if v else f'Row{row_id}'
+
+        om, nm = defmap(self.old), defmap(self.new)
+        sit_by_no = {x['SitsumonNo']: x for x in self.new.data.get('SitsumonItem', [])}
+        for no in sorted(nm):
+            if no in om and om[no] != nm[no]:
+                name = sit_by_no.get(no, {}).get('Mesho', f'質問No:{no}')
+                rows.append([
+                    '質問設定', '変更', f'質問No:{no}', name,
+                    row_text(self.old, no, om[no]), row_text(self.new, no, nm[no]),
+                    '初期値変更',
+                ])
         return rows
 
     # ------------------------------------------------------------------
