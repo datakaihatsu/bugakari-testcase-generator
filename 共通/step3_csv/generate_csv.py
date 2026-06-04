@@ -492,6 +492,9 @@ class ColumnTCGenerator:
                     'daika_flags': tc_res.get('daika_row_flags', {}),
                     'tc_scope': dict(tcw.hyo._user_inputs),
                     'closed': set(getattr(tcw, 'closed_sitsumons', ())),
+                    # 07-①: auto軸の表示行を walker の実選択行に合わせるため保持
+                    'sit_selections': dict(tc_res.get('sit_selections', {})),
+                    'row_sources': dict(getattr(tcw, 'row_sources', {})),
                 })
                 all_visited.update(visited)
 
@@ -520,6 +523,8 @@ class ColumnTCGenerator:
                                 'daika_flags': tc_res.get('daika_row_flags', {}),
                                 'tc_scope': dict(tcw.hyo._user_inputs),
                                 'closed': set(getattr(tcw, 'closed_sitsumons', ())),
+                                'sit_selections': dict(tc_res.get('sit_selections', {})),
+                                'row_sources': dict(getattr(tcw, 'row_sources', {})),
                             }
                             all_visited.update(tc_walks[-1]['visited'])
                             break
@@ -565,6 +570,22 @@ class ColumnTCGenerator:
                 if row is None:
                     continue
                 chosen_rows_by_ax[ax_id] = row
+            # 07-①: auto軸は walker が AutoSelectJoken で実選択した行を表示する
+            #   (デフォルト行表示だと実機の自動確定実行と食い違う。
+            #    例: 07 代価表の当り数量 O~AT2=ATJ=100 → 「100当り代価表」行)
+            #   walker の選択経緯が 'auto' の場合のみ上書き (default/first は従来通り)
+            for ax in fix_or_auto_axes:
+                if ax['種別'] != 'auto':
+                    continue
+                sit_no = int(ax['SitsumonNo'])
+                if tcw_data.get('row_sources', {}).get(sit_no) != 'auto':
+                    continue
+                sel = tcw_data.get('sit_selections', {}).get(sit_no)
+                if sel is None:
+                    continue
+                w_row = self._get_row_by_id(self._get_axis_rows(sit_no), sel)
+                if w_row is not None:
+                    chosen_rows_by_ax[ax['軸ID']] = w_row
             for (ax, _), chosen_row in zip(vary_row_lists, combo):
                 chosen_rows_by_ax[ax['軸ID']] = chosen_row
 

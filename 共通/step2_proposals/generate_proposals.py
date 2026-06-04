@@ -174,10 +174,12 @@ class TestPlanGenerator:
         #   例: 06 材料の選択(土のう/土砂)=表示、02 軽油(ExecKind=None,非対話)=非表示。
         #   ただし「分岐から複数のKind=8へ扇状展開」(例: 00 砕石の種類→種類別マスタ群)は
         #   既に分岐質問が列になっており Kind=8 は選択のエコー → 非表示。
+        # 07-2: Kind=8 (単価マスタ選択) は「単価選択する質問」であり、歩掛の条件
+        #   ではない (例: 07 再生砂は敷材料の種類に従属して単価を選ぶだけ)。
+        #   07 フィードバックにより全工種共通で列から除外に統一。
+        #   (旧: ExecKind=2 のものは列対象。06 材料の選択(土砂) もこの統一で除外)
         if kind == 8:
-            if sit.get('SitsumonExecuteKind') != 2:
-                return False
-            return not self._is_kind8_echo(sit)
+            return False
         if kind not in (17, 19):
             return False
         # 自動決定(AutoSelectJokenの駆動変数がJSON内で確定)の質問は、ユーザが選ばない
