@@ -20,3 +20,6 @@ gemini-code-*.md
 # IDE
 .vscode/
 *.code-workspace
+
+# Office 一時ロックファイル
+~$*

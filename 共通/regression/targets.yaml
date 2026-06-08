@@ -1,0 +1,66 @@
+# 回帰テスト対象レジストリ
+# 合格工種が増えたらここにエントリを追加し、
+#   python3 共通/regression/run_regression.py --update-baseline <id>
+# でベースラインを取得する(それだけで回帰対象になる)。
+#
+# mode:
+#   diff : 差分起点モード (pipeline.py old new output)
+#   new  : 新規工種モード (generate_proposals_new.py + generate_csv.py、step1系なし)
+
+baseline_name: pre_J2
+baseline_root: 進捗報告/regression_baseline
+report_path: 進捗報告/regression_report_最新.md
+
+default_steps_diff:
+  - step1.0_差分レポート.csv
+  - step1.5_乖離チェック.csv
+  - step2.0_テスト計画.csv
+  - step3.0_テストケース.csv
+default_steps_new:
+  - step2.0_テスト計画.csv
+  - step3.0_テストケース.csv
+
+targets:
+  - id: 00_32-4527_裏込砕石工
+    mode: diff
+    old: 32-4527.20250401.20250401.json
+    new: 32-4527.20260401.20260401.json
+
+  - id: 01_619040_回航費-旅費等
+    mode: diff
+    old: 6439-667.20250401.20251001.json
+    new: 6439-667.20250401.20260401.json
+
+  - id: 02_605773_大型ブレーカ
+    mode: diff
+    old: 32-1951.20180401.20180401.json
+    new: 32-1951.20260401.20260401.json
+
+  - id: 03_607674_送気用設備運転費
+    mode: diff
+    old: 32-571.20250401.20250401.json
+    new: 32-571.20260401.20260401.json
+
+  - id: 04_607092_下地処理工(復興係数)
+    mode: diff
+    old: 32-1175.20170401.20170401.json
+    new: 32-1175.20260401.20260401.json
+
+  - id: 05_605171_掘削等
+    mode: diff
+    old: 32-10736.20200401.20200401.json
+    new: 32-10736.20260401.20260401.json
+
+  - id: 06_606964_土のう積工
+    mode: diff
+    old: 32-735.20240401.20240401.json
+    new: 32-735.20260401.20260401.json
+
+  - id: 07_608358_インターロッキングブロック工
+    mode: diff
+    old: 32-2344.20250401.20250401.json
+    new: 32-2344.20260401.20260401.json
+
+  - id: 08_619733_薬剤(Kg)
+    mode: new
+    new: 32-30589.20260401.20260401.json

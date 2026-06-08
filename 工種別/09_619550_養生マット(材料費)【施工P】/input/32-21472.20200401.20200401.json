@@ -1,0 +1,25 @@
+﻿{"FileVersion":1,"LastUpdateDate":"2020/04/02 00:00:00","BugakariKanri":
+{"Mesho":"養生マット(材料費)","KanriFlags":[0,101,104],"MaxDaikaHyoCD":1,"MaxDaikaItemCD":1,"MaxKeisanItemCD":9,"MaxSitsumonNo":2,"MaxSerialNo":{},"MaxTabNo":
+{"1":0},"MaxPanelNo":1,"MaxBoxNo":
+{"1":2},"BugakariVersion":"10.00"},"Daika":[
+{"DaikaHyoCD":1,"DaikaTitle":"養生マット(材料費)","AtariSuryo":"1","AtariTani":"m2","Mesho":"養生マット(材料費)"}],"DaikaItem":[
+{"DaikaItemCD":1,"SerialNo":1,"TankaCD":"32-1-102-33-63527","HyoKind":201}],"DaikaItemLine":[
+{"DaikaHyoCD":1,"DaikaItemCD":1,"Suryo":"1","SuryoRitsu":"","SuryoRitsuLinkKeisanItemCD":8,"TankaLinkKeisanItemCD":9,"Column":1,"DaikaItemLineFlags":[0,2,3]}],"KeisanItem":[
+{"KeisanItemCD":1,"Mesho":"<歩掛数値の計算>","KeisanItemFlags":[0]},
+{"KeisanItemCD":2,"Mesho":" 養生マット数量","TaniMesho":"m2/m2","Expression":"110/100","ExpMarumeCD":12,"KeisanItemFlags":[0],"VarName":"S1"},
+{"KeisanItemCD":3,"KeisanItemFlags":[0]},
+{"KeisanItemCD":4,"Mesho":"<養生マット損料計算>","KeisanItemFlags":[0]},
+{"KeisanItemCD":5,"Mesho":" マット損料","TaniMesho":"円/m2","Expression":"TN*S","ExpMarumeCD":53,"KeisanItemFlags":[0],"VarName":"SO"},
+{"KeisanItemCD":6,"Mesho":" マット購入価格","TaniMesho":"円/m2","KeisanItemFlags":[0],"VarName":"TN"},
+{"KeisanItemCD":7,"Mesho":" マット償却率","Value":0.25,"KeisanItemFlags":[0],"VarName":"S"},
+{"KeisanItemCD":8,"Mesho":"代価表1行目:数率","Expression":"S1","KeisanItemFlags":[0,3],"VarName":"D1R"},
+{"KeisanItemCD":9,"Mesho":"代価表1行目:単価","Expression":"SO","KeisanItemFlags":[0,4],"VarName":"D1T"}],"SitsumonItem":[
+{"SitsumonNo":1,"SitsumonKind":8,"Mesho":"養生マット","SitsumonExecuteKind":2,"KikakuKeijoRec":{},"SitsumonFlags":[105],"SitsumonVersion":"2017/04/01 00:00:00"},
+{"SitsumonNo":2,"SitsumonKind":205,"Mesho":"終点","KikakuKeijoRec":{},"SitsumonVersion":"2017/04/01 00:00:00","SitsumonProperty":",2=1,"}],"Sitsumon008":[
+{"SitsumonNo":1,"DefaultTankaCD":"32-1-102-33-63527","JokenCDList":[
+{"JokenNo":6,"VarName":"TN"}],"DaikaItemCD":1,"KeijoSakiTankaCD":"32-1-102-33-63527","KeijoSakiSerialNo":1}],"SitTab":[
+{"SitsumonNo":1,"TabMesho":"基本","TabJoken":{}}],"FlowTitles":[
+{"PanelNo":1,"PanelMesho":"パネル1"}],"FlowItems":[
+{"PanelNo":1,"BoxNo":1,"FlowKind":1,"SitsumonNo":1,"XPos":1,"YPos":1,"CallBox":[2],"FlowItemFlags":[0]},
+{"PanelNo":1,"BoxNo":2,"FlowKind":5,"SitsumonNo":2,"XPos":2,"YPos":1,"CallBox":[-1]}],"KikakuKeijoGaia9":[
+{"SitsumonNo":1,"InfoKind":1,"Number":2,"DataStart":1,"DataLen":40,"KikakuStart":201}]}

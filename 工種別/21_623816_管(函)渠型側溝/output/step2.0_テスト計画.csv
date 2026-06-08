@@ -1,0 +1,9 @@
+軸ID,軸名,種別,SitsumonNo,列ラベル,変更理由,備考,強制行ID
+AX-001,日当り作業量補正(道路維持等作業効率低下),fix,14,日当り作業量補正(道路維持等作業効率低下),,SitsumonKind=19,
+AX-002,作業区分,fix,1,作業区分,,SitsumonKind=19,
+AX-003,側溝規格,vary,33,側溝規格,選択肢追加,SitsumonKind=19,
+AX-004,基礎砕石の有無,fix,2,基礎砕石の有無,,SitsumonKind=19,
+AX-005,(バックホウ 山積0.28m3)賃料長期割引の適用,fix,7,(バックホウ 山積0.28m3)賃料長期割引の適用,,SitsumonKind=19,
+AX-006,側溝材料初期値区分,auto,28,側溝材料初期値区分(固定),"デフォルト実行 (SitsumonExecuteKind=1, SekisanEnv連動なし)",SitsumonKind=19,
+AX-007,側溝材料の単位選択,fix,6,側溝材料の単位選択,,SitsumonKind=19,
+AX-008,1個当り側溝長さ,fix,29,1個当り側溝長さ,,SitsumonKind=17,

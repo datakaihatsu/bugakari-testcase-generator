@@ -48,7 +48,7 @@ class TestPlanGenerator:
     def __init__(self, diff_csv_path, new_json_path, old_json_path=None):
         self.new_json = BugakariJSON(new_json_path)
         self.old_json = BugakariJSON(old_json_path) if old_json_path else None
-        self.diff_rows = self._load_diff(diff_csv_path)
+        self.diff_rows = self._load_diff(diff_csv_path) if diff_csv_path else []
         self._counter = 0
         self.global_rules = load_global_rules()
         self._baseline_visited = None
@@ -57,6 +57,8 @@ class TestPlanGenerator:
         self._baseline_scope_dict = None
 
     def _load_diff(self, path):
+        if not path:
+            return []
         with open(path, encoding='cp932', newline='') as f:
             return list(csv.DictReader(f))
 
@@ -365,6 +367,12 @@ class TestPlanGenerator:
             return False
         self._baseline_walk()
         for r in s019.get('SitTabRows', []):
+            # 選択不可行 (RowFlags=1=IsCannotSelectRow) は自動選択されない
+            #   → この行が条件成立しても製品は自動確定しないため、自動決定判定から除外
+            #   根拠: Sitsumon019Test.cs:211-233 / 仕様書§1.3・ギャップ#4 (2026-06-05)
+            rf = r.get('RowFlags')
+            if isinstance(rf, list) and 1 in rf:
+                continue
             j = r.get('AutoSelectJoken') or {}
             v = j.get('VarName')
             if not v:

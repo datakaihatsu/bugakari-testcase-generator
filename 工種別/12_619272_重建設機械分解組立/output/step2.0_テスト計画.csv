@@ -1,0 +1,5 @@
+軸ID,軸名,種別,SitsumonNo,列ラベル,変更理由,備考,強制行ID
+AX-001,作業区分,fix,42,作業区分,,SitsumonKind=19,
+AX-002,機械質量区分,fix,9,機械質量区分,,SitsumonKind=19,
+AX-003,(ラフテレーンクレーン)賃料長期割引の適用,fix,51,(ラフテレーンクレーン)賃料長期割引の適用,,SitsumonKind=19,
+AX-004,クレーン賃料補正,auto,13,クレーン賃料補正(固定),自動選択(AutoSelectJoken),SitsumonKind=19,

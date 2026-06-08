@@ -380,6 +380,21 @@ class ColumnTCGenerator:
         cols += ['選択肢の適切さ確認']
         return cols, s_present
 
+    def _flow_equiv_rows(self, sit_no, rows):
+        """選択肢削除系 vary 軸の行を到達フロー(visited 質問集合)で集約する。
+        同一フローに落ちる行(値だけ違う。例 鉄筋径)は代表1件に圧縮し、フローが
+        分岐する行(例 作業内容の撤去)は各代表を残す。直積爆発を防ぎ分岐網羅は保つ。
+        """
+        reps = []
+        seen_keys = set()
+        for r in rows:
+            res = FlowWalker(self.new_json, vary_selections={sit_no: r['row_id']}).walk()
+            key = frozenset(res.get('visited_sitsumons', []))
+            if key not in seen_keys:
+                seen_keys.add(key)
+                reps.append(r)
+        return reps if reps else (rows[:1] if rows else [])
+
     def generate(self):
         vary_axes = [ax for ax in self.plan if ax['種別'] == 'vary']
         fix_or_auto_axes = [ax for ax in self.plan if ax['種別'] in ('fix', 'auto')]
@@ -422,8 +437,21 @@ class ColumnTCGenerator:
             reason = ax.get('変更理由', '')
             is_business_rule = '業務ルール' in reason
             added_idx = self._added_row_index_by_sit.get(sit_no)
-            if is_business_rule or added_idx is None:
+            if is_business_rule:
                 filtered = rows
+                added_set = set()
+            elif self.old_json is not None and added_idx is None:
+                # 差分型で新規追加行なし = 選択肢削除/値変更のみ。削除選択肢は新JSONに
+                #   無く列挙不可。残行は「到達フロー(visited)が同じ＝値だけ違う」ものを
+                #   代表1件に集約し、フローが分岐する選択肢は各代表を残す。
+                #   (鉄筋径=集約で直積爆発回避 / 作業内容の撤去等=分岐保持)
+                filtered = self._flow_equiv_rows(sit_no, rows)
+                added_set = set()
+            elif added_idx is None:
+                # 新規工種モード (旧JSONなし)。選択肢でフローが分岐する軸のみ各代表を
+                #   残し、フロー不変(値だけ。例 円周率/排ガス機械の選択)は代表1件に集約。
+                #   → 分岐が必要な選択肢だけ vary 展開し直積爆発を防ぐ。
+                filtered = self._flow_equiv_rows(sit_no, rows)
                 added_set = set()
             else:
                 filtered = rows[added_idx:]

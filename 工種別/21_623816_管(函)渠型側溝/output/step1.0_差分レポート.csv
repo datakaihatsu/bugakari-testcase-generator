@@ -1,0 +1,16 @@
+カテゴリ,変更種別,ID,名称,旧値,新値,備考
+質問,変更,質問No:59,内径又は内空幅(mm),終点,内径又は内空幅(mm),表示名変更 / バージョン更新
+質問,追加,質問No:5,内径又は内空幅(mm),-,選択式,2026/06/04 20:10:56
+質問,追加,質問No:60,終点,-,終点,2017/04/01 00:00:00
+選択肢,追加,質問No:33,側溝規格,-,0,
+フロー,変更,BoxNo:4,終点,質問No:59 CallBox:[],質問No:60 CallBox:[],
+フロー,変更,BoxNo:39,BoxNo:39,質問No:None CallBox:[42],質問No:None CallBox:[43],
+フロー,変更,BoxNo:42,BoxNo:42,質問No:None CallBox:[43],質問No:None CallBox:[7],
+フロー,変更,BoxNo:66,側溝規格,質問No:33 CallBox:[5],"質問No:33 CallBox:[77, 78, 79, 80]",
+フロー,変更,BoxNo:68,側溝規格,質問No:57 CallBox:[7],"質問No:57 CallBox:[4, 29, 42, 54]",
+フロー,追加,BoxNo:29,BoxNo:29,-,質問No:None,CallBox→[基礎砕石の有無]
+フロー,追加,BoxNo:54,内径又は内空幅(mm),-,質問No:5,CallBox→[基礎砕石の有無]
+フロー,追加,BoxNo:77,BoxNo:77,-,質問No:None,CallBox→[基礎砕石の有無]
+フロー,追加,BoxNo:78,BoxNo:78,-,質問No:None,CallBox→[基礎砕石の有無]
+フロー,追加,BoxNo:79,BoxNo:79,-,質問No:None,CallBox→[基礎砕石の有無]
+フロー,追加,BoxNo:80,内径又は内空幅(mm),-,質問No:59,CallBox→[基礎砕石の有無]

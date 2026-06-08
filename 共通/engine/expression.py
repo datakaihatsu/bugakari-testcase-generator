@@ -546,6 +546,20 @@ def default_function_resolver(name: str, args: List):
             return x.quantize(quant, rounding=ROUND_DOWN)
         if n == 'UPPER':
             return x.quantize(quant, rounding=ROUND_UP)
+    # INT/MIN/MAX (ギャップ#1, 2026-06-05)
+    # 根拠: source_ref/sirius Being/Core/Math/CalcCommand.cs G_OperatorDefine
+    #   int = x>0 ? Floor : Ceiling (ゼロ方向への切り詰め。INT(-3.7) = -3)
+    #   min/max = 可変長引数の最小/最大
+    if n == 'INT':
+        if len(args) != 1:
+            raise ExpressionError("INT: 引数が1つ必要です。")
+        x = _to_decimal(args[0])
+        return x.to_integral_value(rounding=ROUND_DOWN)  # ROUND_DOWN=ゼロ方向
+    if n in ('MIN', 'MAX'):
+        if not args:
+            raise ExpressionError(f"{n}: 引数が1つ以上必要です。")
+        vals = [_to_decimal(a) for a in args]
+        return min(vals) if n == 'MIN' else max(vals)
     raise ExpressionError(f"未知の関数: {name}")
 
 
@@ -586,11 +600,25 @@ class KeisanHyo:
         self._cache = {}
         self._evaluating = set()
         self._user_inputs = {}
+        self._externals = set()
         self.strict_undefined = strict_undefined
+
+    def set_external(self, name: str):
+        """変数を外部依存(単価マスタ等・JSON単独で評価不能)として登録する。
+
+        用途: SitsumonKind=113 (SetDaikaTankaToKeisan) で代価表行の単価が
+        変数へ代入されるケース。値は単価マスタ由来なので @N と同じく
+        ExternalReferenceError とし、0 で誤計算しないようにする。
+        (仕様書: 歩掛JSON内部仕様書.md §4.6 P4 / ギャップ#5)
+        """
+        self._externals.add(name)
+        self._cache.clear()
 
     def _resolve_var(self, name: str):
         if name.startswith('@'):
             raise ExternalReferenceError(f"外部単価参照: {name}")
+        if name in self._externals:
+            raise ExternalReferenceError(f"外部単価依存変数 (Sit113計上): {name}")
         if name in self._user_inputs:
             return self._user_inputs[name]
         if name in self._cache:

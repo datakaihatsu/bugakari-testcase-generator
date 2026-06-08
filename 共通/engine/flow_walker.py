@@ -75,6 +75,12 @@ class FlowWalker:
                 self.panel_by_mesho[m] = t.get('PanelNo')
         self.vary_selections = vary_selections or {}
         self.s019 = bugakari_json.sitsumon019_by_no
+        # 代価表連動コマンドの索引 (仕様書 §4.6 / ギャップ#5)
+        self.s105_by_no = {x['SitsumonNo']: x
+                           for x in self.data.get('Sitsumon105', []) if 'SitsumonNo' in x}
+        self.s113_by_no = {x['SitsumonNo']: x
+                           for x in self.data.get('Sitsumon113', []) if 'SitsumonNo' in x}
+        self.daika_postings = []  # 訪問順の Sit105 計上記録
 
         # KeisanHyo (var設定の伝搬を扱うために mutate していく)
         # strict_undefined=True: 親から渡される変数等が未確定なら AutoSelect 評価でエラー→skip
@@ -160,6 +166,23 @@ class FlowWalker:
             sit_no = box.get('SitsumonNo')
             sit_item = self.bj.sitsumon_by_no.get(sit_no, {}) if sit_no else {}
 
+            # --- 代価表連動コマンド (仕様書 §4.6 / ギャップ#5) ---
+            # Sit113 (SetDaikaTankaToKeisan): 行の単価(単価マスタ由来)→変数。
+            #   JSON 単独では評価不能のため外部依存として登録 (0 での誤計算を防ぐ)
+            if sit_no in self.s113_by_no:
+                vn = self.s113_by_no[sit_no].get('VarName')
+                if vn:
+                    self.hyo.set_external(vn)
+            # Sit105 (SetKeisanToDaika): 変数→代価表(数量/単価/当り数量)へ計上。
+            #   訪問順に記録し、期待値側での利用に備える (KeijoSaki: 1=数量,2=単価,3=当り数量)
+            if sit_no in self.s105_by_no:
+                r = self.s105_by_no[sit_no]
+                self.daika_postings.append({
+                    'VarName': r.get('VarName'),
+                    'KeijoSaki': r.get('KeijoSaki'),
+                    'DaikaItemCD': r.get('DaikaItemCD'),
+                })
+
             # フロー切替 (SitsumonKind=119): 対象パネルをサブルーチン呼び出し
             if sit_item.get('SitsumonKind') == 119:
                 target = self._resolve_switch_panel(sit_item.get('Mesho', ''))
@@ -208,6 +231,7 @@ class FlowWalker:
             'row_sources': dict(self.row_sources),
             'scope': scope,
             'daika_row_flags': daika_row_flags,
+            'daika_postings': list(self.daika_postings),
         }
 
     def _extract_daika_row_flags(self, visited_sits):
@@ -265,6 +289,11 @@ class FlowWalker:
         # 2. AutoSelectJoken で auto-selectable な行
         # strict モードのため、未確定変数を含む joken は ExpressionError で skip される
         for row in sit019.get('SitTabRows', []):
+            # 選択不可行 (RowFlags=1=IsCannotSelectRow) は自動選択の対象外
+            #   根拠: Sitsumon019Test.cs:211-233 / 仕様書§1.3・ギャップ#4 (2026-06-05)
+            rf = row.get('RowFlags')
+            if isinstance(rf, list) and 1 in rf:
+                continue
             joken = row.get('AutoSelectJoken')
             if not joken or not (joken.get('VarName') or joken.get('Shiki')):
                 continue

@@ -1,0 +1,8 @@
+軸ID,軸名,種別,SitsumonNo,列ラベル,変更理由,備考,強制行ID
+AX-001,施工方法,vary,1,施工方法,新規工種:全選択肢網羅,SitsumonKind=19,
+AX-002,土留方式の種類,vary,4,土留方式の種類,新規工種:全選択肢網羅,SitsumonKind=19,
+AX-003,障害の有無,vary,6,障害の有無,新規工種:全選択肢網羅,SitsumonKind=19,
+AX-004,施工方法,auto,5,施工方法(固定),自動確定 (AutoSelectJokenの駆動変数が確定),SitsumonKind=19,
+AX-005,普通作業員の計上有無判断,auto,16,普通作業員の計上有無判断(固定),自動確定 (AutoSelectJokenの駆動変数が確定),SitsumonKind=19,
+AX-006,適用労務選択方法の切替,auto,17,適用労務選択方法の切替(固定),自動確定 (AutoSelectJokenの駆動変数が確定),SitsumonKind=19,
+AX-007,労務費の適用,fix,18,労務費の適用,,SitsumonKind=19,

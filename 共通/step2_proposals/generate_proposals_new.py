@@ -6,22 +6,16 @@
 新規作成された工種は旧JSONが存在せず差分が取れないため、差分起点の
 絞り込みができない。代わりに「カバレッジ基準を満たす有効抜粋」でテストを構築する。
 
-【採用カバレッジ基準: ハイブリッド】
-- 分岐網羅 + 各選択肢網羅(1-wise) を基本
-- 同一計算式・同一代価表行に共起する軸どうしのみ pairwise に引き上げ
-  (※ 組合せ生成は step3 generate_csv 側。本スクリプトは vary/fix の分類まで。
-     現状 vary 軸が単一の工種では 1-wise=直積=ハイブリッドで一致する。
-     複数 vary 軸が相互作用する工種が出た時点で combos を pairwise 化する。)
-
 【軸の分類】
-- UI 可視の選択質問 (SitsumonKind=19) で選択可能行≥2 かつ デフォルト実行でない → vary
-- デフォルト実行 (J3 条件: ExecKind=1 + Flags⊆{105,108} + Kind≠17)        → auto
-- 数値入力 (SitsumonKind=17)                                              → fix (任意 表示)
-- 単一選択 (選択可能行<2)                                                  → fix
-- マスタ選択 (SitsumonKind=8) 等                                          → 列に出さない (実体はデフォルト固定)
+- UI 可視の選択質問 (SitsumonKind=19) で選択可能行>=2 かつ デフォルト実行でない
+  かつ 自動確定でない                                                     -> vary
+- デフォルト実行 (J3 条件: ExecKind=1 + Flags subset {105,108} + Kind!=17)  -> auto
+- 自動確定 (AutoSelectJoken の駆動変数が確定し最終値が行を自動選択)         -> auto
+- 数値入力 (SitsumonKind=17)                                              -> fix (任意 表示)
+- 単一選択 (選択可能行<2)                                                  -> fix
+- マスタ選択 (SitsumonKind=8) 等                                          -> 列に出さない
 
 【到達質問の探索】
-旧 baseline 走査だけではデフォルト分岐しか辿れない (例: 08 は kg単位 経路のみ)。
 各選択肢を選んで走査し、訪問質問を union することで全分岐の到達質問を集める。
 
 【入力】 新JSON のみ
@@ -34,6 +28,7 @@ import os
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'engine'))
 from bugakari_json import BugakariJSON
 from flow_walker import FlowWalker
+from generate_proposals import TestPlanGenerator
 
 HEADER = ['軸ID', '軸名', '種別', 'SitsumonNo', '列ラベル', '変更理由', '備考', '強制行ID']
 
@@ -43,6 +38,9 @@ class NewKotsuPlanGenerator:
     def __init__(self, new_json_path):
         self.bj = BugakariJSON(new_json_path)
         self._counter = 0
+        # 自動確定検知 (AutoSelectJoken の駆動変数->自動選択) を差分型と共用する。
+        #   差分なしで使うため diff_csv_path=None で生成 (差分起点ロジックは未使用)。
+        self._auto = TestPlanGenerator(None, new_json_path)
 
     def _next_id(self):
         self._counter += 1
@@ -50,7 +48,7 @@ class NewKotsuPlanGenerator:
 
     @staticmethod
     def _is_default_exec(sit):
-        """J3 条件: ExecKind=1 + Flags⊆{105,108} + Kind≠17 = デフォルト実行。"""
+        """J3 条件: ExecKind=1 + Flags subset {105,108} + Kind!=17 = デフォルト実行。"""
         if sit.get('SitsumonExecuteKind') != 1:
             return False
         if sit.get('SitsumonKind') == 17:
@@ -78,11 +76,9 @@ class NewKotsuPlanGenerator:
                     seen.add(sn)
                     order.append(sn)
 
-        # baseline
         base = FlowWalker(self.bj).walk()
         add_seq(base.get('visited_sitsumons', []))
 
-        # 各選択質問の各行を選んで再走査 (fixpoint)
         changed = True
         guard = 0
         while changed and guard < 50:
@@ -115,9 +111,8 @@ class NewKotsuPlanGenerator:
             note = f'SitsumonKind={kind}'
 
             if kind == 205:
-                continue  # 終点
+                continue
             if kind == 8:
-                # マスタ選択 (薬剤等)。列挙可能な代替が無いため列に出さない (実体は既定固定)。
                 continue
             if kind not in (17, 19):
                 continue
@@ -127,13 +122,19 @@ class NewKotsuPlanGenerator:
                              'デフォルト実行 (SitsumonExecuteKind=1, SekisanEnv連動なし)', note, ''])
                 continue
             if kind == 17:
-                # 数値入力 (任意)。列として表示するが値は任意入力。
                 plan.append([self._next_id(), name, 'fix', sn, name, '', note, ''])
                 continue
             # kind == 19
             rows = self._selectable_rows(sn)
             if len(rows) >= 2:
-                plan.append([self._next_id(), name, 'vary', sn, name, '新規工種:全選択肢網羅', note, ''])
+                # 自動確定検知: AutoSelectJoken の駆動変数が上流で確定し、最終値が
+                #   行を自動選択する質問はユーザが選ばない (例: 17 クレーン規格、駆動変数 L~CK)。
+                #   vary にすると選択肢分の直積爆発を起こすため auto に降格する。
+                if self._auto._is_autodetermined(sit):
+                    plan.append([self._next_id(), name, 'auto', sn, f'{name}(固定)',
+                                 '自動確定 (AutoSelectJokenの駆動変数が確定)', note, ''])
+                else:
+                    plan.append([self._next_id(), name, 'vary', sn, name, '新規工種:全選択肢網羅', note, ''])
             else:
                 plan.append([self._next_id(), name, 'fix', sn, name, '', note, ''])
         return plan
