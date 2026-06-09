@@ -292,16 +292,19 @@ class ColumnTCGenerator:
         return added
 
     def _has_kikaku_keijo(self, sitsumon_no):
-        """J2: Sitsumon019 の SitTabCols に KikakuKeijoNaiyo (Unknown 以外) が設定されているか判定。
-        Sirius ソース Sitsumon019KikakuKeijoTest.cs に準拠。
-        戻り値: True=規格名計上設定あり / False=なし
+        """J2: 規格名計上(規格名/規格を代価表へ計上)が設定された質問か。
+        Gaia9方式(主): KikakuKeijoGaia9 レコードに該当 SitsumonNo があれば計上あり。
+          (Sirius: Sitsumon019KikakuKeijoGaia9Test.cs。BugakariKanri.IsKikakuKeijoGaia9 工種)
+        旧方式(フォールバック): SitTabCols.KikakuKeijoNaiyo != 0。
         """
+        for r in self.new_json.data.get('KikakuKeijoGaia9', []) or []:
+            if r.get('SitsumonNo') == sitsumon_no:
+                return True
         sit019 = self.new_json.sitsumon019_by_no.get(sitsumon_no)
         if not sit019:
             return False
         for col in sit019.get('SitTabCols', []):
             keijo = col.get('KikakuKeijoNaiyo')
-            # 0 / None / Unknown は計上なし扱い
             if keijo and keijo != 0:
                 return True
         return False
@@ -377,7 +380,7 @@ class ColumnTCGenerator:
         cols += [ax['列ラベル'] for ax in axes_sorted]
         s_present = self._daika_output_s()
         cols += [f'期待:{v}' for v in s_present]
-        cols += ['選択肢の適切さ確認']
+        cols += ['選択肢の適切さ確認', '規格名計上']
         return cols, s_present
 
     def _flow_equiv_rows(self, sit_no, rows):
@@ -679,6 +682,7 @@ class ColumnTCGenerator:
                     row_data.append(f'(エラー: {e.__class__.__name__})')
 
             checks = []
+            kikaku_checks = []  # 規格名計上は別列に分離
             for (ax, _), chosen_row in zip(vary_row_lists, combo):
                 # J4: この TC で到達しない vary 軸の確認観点は出さない
                 if int(ax['SitsumonNo']) not in tc_visited:
@@ -713,8 +717,8 @@ class ColumnTCGenerator:
                 # J2: 規格名計上の確認観点
                 #   - 修正対象 (差分検出 vary 軸) のみ
                 #   - JSON 上で KikakuKeijoNaiyo が設定されている軸のみ
-                if is_diff_vary and self._has_kikaku_keijo(int(ax['SitsumonNo'])):
-                    checks.append(f'・{ax["軸名"]} の規格名計上が意図通りの場所に正しく計上されているか')
+                if (is_diff_vary or self.old_json is None) and self._has_kikaku_keijo(int(ax['SitsumonNo'])):
+                    kikaku_checks.append(f'・{ax["軸名"]} の規格名計上が意図通りの場所に正しく計上されているか')
             # G: 状態戻し回帰TC の確認観点
             if tc_idx > num_diff_tcs and biz_rule_axis_idx is not None:
                 biz_ax = vary_row_lists[biz_rule_axis_idx][0]
@@ -734,6 +738,7 @@ class ColumnTCGenerator:
             if self._has_added_daika():
                 checks.append('・追加された代価表行と数量(数率)が外部設計に沿っているか')
             row_data.append('\n'.join(checks))
+            row_data.append('\n'.join(kikaku_checks))
             # J4: 重複TC除去 (vary 軸がこの TC で到達しない場合、選択違いでも
             #     条件・期待値・確認観点が同一になる。同一行は1件に畳む)
             dup_key = tuple(row_data[1:])
