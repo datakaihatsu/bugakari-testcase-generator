@@ -66,6 +66,20 @@ JAPANESE_KW_RE = re.compile(r'[一-龯ぁ-んァ-ヶー]{2,}')
 # 修正方針タイトル候補
 TITLE_PATTERNS = ('修正方針', '修正内容', '変更内容')
 
+# 見出し行スキップ用: 変更を表す動詞が無く、見出し語尾で終わる行は項目化しない
+_HEADING_SUFFIX = ('メモ',)  # 「メモ」終わりの短い見出しのみ (について等は実文に多用され誤除外するため除く)
+_CHANGE_KW = ('追加', '削除', '変更', '修正', '対応', '入力', '計上', '差し替え', '差替',
+              '開か', '設定', '複写', '移動', '入れ込', '反映', '作成', '新規', 'リネーム',
+              '用意', '付け', '持って', '配置', '切替', '切り替え')
+
+# 単価DB/指定単価の意図検出 (Kind=8 単価マスタ選択質問の追加に紐付ける)
+_TANKA_CODE_RE = re.compile(r'\d+-\d+-\d+-\d+')
+_TANKA_DB_KW = ('単価DB', '指定単価', '単価マスタ', '単価ＤＢ')
+
+
+def _is_tanka_db_intent(body):
+    return bool(_TANKA_CODE_RE.search(body)) or any(k in body for k in _TANKA_DB_KW)
+
 # 出力列 (リスク評価3列追加)
 HEADER = [
     '修正方針カテゴリ', '修正方針本文', '機械判定',
@@ -141,6 +155,12 @@ def load_intent(path):
             continue
 
         if any(p in body for p in TITLE_PATTERNS) and len(body) <= 12:
+            continue
+
+        # 見出し行 (変更動詞なし かつ 「〜メモ/概要/補足/について/注意/一覧」) は項目化しない
+        #   例: 「【山口県独自】部分の確認メモ」(18) は変更ではなく見出し
+        if (not any(k in body for k in _CHANGE_KW)
+                and body.endswith(_HEADING_SUFFIX) and len(body) <= 20):
             continue
 
         if len(body) <= 8:
@@ -306,6 +326,22 @@ def run(intent_path, diff_csv_path, output_path, new_json_path=None, old_json_pa
     new_qnames, new_tanka = _load_names(new_json_path)
     old_qnames, old_tanka = _load_names(old_json_path)
 
+    # Kind=8 (単価マスタ選択=単価DB質問) の質問No と、その追加が差分にあるか
+    kind8_nos = set()
+    if new_json_path and os.path.exists(new_json_path):
+        with open(new_json_path, encoding='utf-8-sig') as _f8:
+            _d8 = _json.load(_f8)
+        kind8_nos = {it.get('SitsumonNo') for it in _d8.get('SitsumonItem', [])
+                     if it.get('SitsumonKind') == 8}
+    def _qno(rid):
+        m = re.search(r'質問No[:：]\s*(\d+)', rid or '')
+        return int(m.group(1)) if m else None
+    kind8_added = any(
+        r.get('カテゴリ') == '質問' and r.get('変更種別') == '追加'
+        and _qno(r.get('ID', '')) in kind8_nos
+        for r in diff_rows
+    )
+
     # Claude判定を読み込み (output ディレクトリの claude_risk_judgement.yaml)
     output_dir = os.path.dirname(output_path)
     judgement_path = os.path.join(output_dir, 'claude_risk_judgement.yaml')
@@ -341,6 +377,12 @@ def run(intent_path, diff_csv_path, output_path, new_json_path=None, old_json_pa
             partial_count += 1
             match_str = f"{row.get('カテゴリ','')}/{row.get('変更種別','')}/{row.get('名称','')}"
             match_id = row.get('ID', '')
+        elif _is_tanka_db_intent(item['本文']) and kind8_added:
+            # 単価DB/指定単価の意図は Kind=8 単価マスタ選択質問の追加に対応 (例: 09 施工P材料費)
+            mech_status = 'partial'
+            partial_count += 1
+            match_str = '(単価DB質問 Kind=8 の追加に対応)'
+            match_id = ''
         elif item['カテゴリ'] != '?' and item['カテゴリ'] in diff_categories:
             mech_status = 'category_partial'
             partial_count += 1

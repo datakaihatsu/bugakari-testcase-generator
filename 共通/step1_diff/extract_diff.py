@@ -165,6 +165,21 @@ class DiffExtractor:
                     name, f'{o_lines}行', '-', '',
                 ])
 
+        # 代価表ヘッダ(Daika)の当り単位(AtariTani)変更 (例: m2→m3。計算基礎が変わる重要変更)
+        old_dk = {d.get('DaikaHyoCD'): d for d in self.old.data.get('Daika', [])}
+        new_dk = {d.get('DaikaHyoCD'): d for d in self.new.data.get('Daika', [])}
+        for cd, d in sorted(new_dk.items(), key=lambda x: str(x[0])):
+            if cd in old_dk:
+                nm = d.get('Mesho') or f'DaikaHyoCD:{cd}'
+                o_at = old_dk[cd].get('AtariTani', '') or ''
+                n_at = d.get('AtariTani', '') or ''
+                same_hyo = (old_dk[cd].get('Mesho') or '') == (d.get('Mesho') or '')
+                if same_hyo and o_at != n_at:
+                    rows.append([
+                        '代価表', '変更', _fmt_id('代価表', f'DaikaHyoCD:{cd}'),
+                        nm, o_at, n_at, '当り単位変更',
+                    ])
+
         return rows
 
     # ------------------------------------------------------------------
@@ -196,6 +211,16 @@ class DiffExtractor:
                     rows.append([
                         '計算表', '変更', _fmt_id('計算表', raw_id),
                         name, str(old_val), str(new_val), note,
+                    ])
+                # 単位名称(TaniMesho)の変更 (例: 人/100m2→人/100m3)
+                #   同一CDに別変数が来る番号ずれを除くため VarName 一致時のみ判定
+                old_tani = old_item.get('TaniMesho', '') or ''
+                new_tani = item.get('TaniMesho', '') or ''
+                same_var = (old_item.get('VarName') or '') == (item.get('VarName') or '')
+                if same_var and str(old_tani) != str(new_tani):
+                    rows.append([
+                        '計算表', '変更', _fmt_id('計算表', raw_id),
+                        name, str(old_tani), str(new_tani), '単位変更',
                     ])
 
         for cd, item in sorted(old_map.items()):
