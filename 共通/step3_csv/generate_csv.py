@@ -375,6 +375,26 @@ class ColumnTCGenerator:
             ordered = sorted(set(cands), key=lambda x: int(x[1:]))
         return ordered
 
+    @staticmethod
+    def _is_noise_column(ax):
+        """列に出さない軸か。
+        除外するのは次のみ (テスト変数でなく、ユーザが再選択しないもの):
+          (1) 「自動確定」軸 = AutoSelectJoken の駆動変数が確定し行が一意に決まる
+              (例: 17 クレーン規格←L~CK=60)。再選択の余地がない帰結。
+          (2) 「変数=値」形式の定数設定fix軸 (計設定。例 L~CK=60 / L~N=0 / L~α=1)。
+        ※「デフォルト実行」「自動選択(AutoSelectJoken)」軸は **初回は選択不要だが
+          ユーザが再選択可能** なので列に残す (02/03/04/06/07 等)。
+        ※内部の確認観点(規格名計上・初期値変更等)では axes_displayed を引き続き使う。
+        """
+        if '自動確定' in (ax.get('変更理由', '') or ''):
+            return True
+        if ax.get('種別') == 'fix':
+            import re as _re
+            nm = (ax.get('軸名', '') or '').strip()
+            if _re.fullmatch(r'[^\s=]+\s*=\s*-?\d+(?:\.\d+)?', nm):
+                return True
+        return False
+
     def _build_headers(self, axes_sorted):
         cols = ['テストID', 'テスト区分']
         cols += [ax['列ラベル'] for ax in axes_sorted]
@@ -583,7 +603,14 @@ class ColumnTCGenerator:
             print(f'  [列除外] 到達せず: {len(axes_excluded)}件 -> '
                   + ', '.join(ax['軸名'] for ax in axes_excluded))
 
-        headers, s_present = self._build_headers(axes_displayed)
+        # 列表示ポリシー: auto軸・定数設定fix軸は列から除外 (確認観点には axes_displayed を使用)
+        axes_columns = [ax for ax in axes_displayed if not self._is_noise_column(ax)]
+        col_excluded = [ax for ax in axes_displayed if ax not in axes_columns]
+        if col_excluded:
+            print(f'  [列除外] 自動確定/定数: {len(col_excluded)}件 -> '
+                  + ', '.join(ax['軸名'] for ax in col_excluded))
+
+        headers, s_present = self._build_headers(axes_columns)
         out_rows = []
         seen_tc_keys = set()
         s_to_row = {f'S{i}': i for i in range(1, 40)}
@@ -651,7 +678,7 @@ class ColumnTCGenerator:
             row_data = [tc_id, test_kind]
             # J1: TC ごとに、その vary 軸が訪問されない場合は "-" 表記
             tc_visited = tcw_data['visited']
-            for ax in axes_displayed:
+            for ax in axes_columns:
                 sit_no = int(ax['SitsumonNo'])
                 row = chosen_rows_by_ax.get(ax['軸ID'])
                 if sit_no not in tc_visited or sit_no in tcw_data.get('closed', ()):
