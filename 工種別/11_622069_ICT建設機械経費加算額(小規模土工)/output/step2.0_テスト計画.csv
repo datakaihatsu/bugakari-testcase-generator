@@ -1,0 +1,3 @@
+軸ID,軸名,種別,SitsumonNo,列ラベル,変更理由,備考,強制行ID
+AX-001,工種区分,vary,2,工種区分,選択肢削除,SitsumonKind=19,
+AX-002,施工数量,fix,4,施工数量,,SitsumonKind=19,

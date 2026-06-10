@@ -1,0 +1,4 @@
+軸ID,軸名,種別,SitsumonNo,列ラベル,変更理由,備考,強制行ID
+AX-001,1日当りのMC/MGバックホウ技術機械経費加算額,fix,1,1日当りのMC/MGバックホウ技術機械経費加算額,,SitsumonKind=17,
+AX-002,1式当りの施工数量,fix,2,1式当りの施工数量,,SitsumonKind=17,
+AX-003,日当り標準作業量,fix,3,日当り標準作業量,,SitsumonKind=17,
