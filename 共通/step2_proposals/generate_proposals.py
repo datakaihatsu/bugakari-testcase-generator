@@ -334,6 +334,18 @@ class TestPlanGenerator:
             ok = ok and value == nv
         return ok
 
+    def _level_value_is(self, sit, value):
+        """レベル変数(LevelVarName)の評価値が value か。仕様§1.5: 1=計設定/2=デフォルト選択/3=必ず実行。"""
+        lv = sit.get('LevelVarName')
+        if not lv:
+            return False
+        self._baseline_walk()
+        v = self._resolve_value(lv)
+        try:
+            return v is not None and float(v) == float(value)
+        except Exception:
+            return False
+
     def _is_autodetermined(self, sit):
         """自動決定(=軸から除外すべき)か。
         条件: AutoSelectJoken のいずれかの行が、
@@ -518,6 +530,11 @@ class TestPlanGenerator:
             if forced:
                 kind = 'fix'
                 reason = '絞り込みで強制(vary到達経路)'
+            elif self._level_value_is(s, 3):
+                # レベル変数=3 (Execute/必ず実行) はユーザが選ぶ質問 → vary
+                #   (仕様§1.5。src=='auto' でも auto に落とさない。例 12/15/17 クレーン賃料補正・子代価)
+                kind = 'vary'
+                reason = 'レベル変数=3(必ず実行)'
             elif src == 'auto' and exec_kind == 2 and not s.get('LevelVarName'):
                 # 自動選択+ユーザー実行 → 通常はスキップ。ただしレベル変数を持つ質問は
                 # レベル最終値≠1なら「開く」(ここに到達した時点で≠1) → fix列として表示する。
