@@ -50,6 +50,17 @@ MAX_ROW_LIST = 10              # 追加/削除行の表示上限
 # CSV 読み込み (cp932 / utf-8-sig 両対応)
 # =====================================================================
 
+def gokaku_csv(out_dir):
+    """工種 output 内の【合格】CSV(最終テストケースの人承認版)を返す。無ければ None。
+    回帰の step3 はこの合格CSVと照合する(=人の承認を唯一の正とする)。"""
+    import glob as _g
+    exact = out_dir / 'step3.0_テストケース【合格】.csv'
+    if exact.exists():
+        return exact
+    cands = sorted(_g.glob(str(out_dir / '*【合格】.csv')))
+    return Path(cands[0]) if cands else None
+
+
 def read_csv_rows(path):
     data = Path(path).read_bytes()
     for enc in ('cp932', 'utf-8-sig'):
@@ -246,9 +257,17 @@ def main():
         diffs = []
         missing = []
         for f in steps_of(t):
-            bp, cp = bdir / f, out / f
+            cp = out / f
+            if f == 'step3.0_テストケース.csv':
+                # 最終テストケースは【合格】CSV(人の承認)と照合する
+                bp = gokaku_csv(out)
+                if bp is None:
+                    missing.append(f'{f} (合格CSVなし)')
+                    continue
+            else:
+                bp = bdir / f
             if not bp.exists() or not cp.exists():
-                missing.append(f'{f} ({"baseline" if not bp.exists() else "出力"}なし)')
+                missing.append(f'{f} ({"baseline/合格" if not bp.exists() else "出力"}なし)')
                 continue
             if bp.read_bytes() == cp.read_bytes():
                 continue
@@ -272,7 +291,7 @@ def main():
     rep = []
     rep.append(f'# 回帰テスト結果 {time.strftime("%Y-%m-%d %H:%M")}')
     rep.append('')
-    rep.append(f'- 対象: {len(results)} 工種 / ベースライン: {cfg["baseline_name"]}')
+    rep.append(f'- 対象: {len(results)} 工種 / step3=【合格】CSV照合 / 中間ステップ基準: {cfg["baseline_name"]}')
     rep.append(f'- 実行時間: {total_sec:.1f} 秒'
                + (' (比較のみ)' if args.no_run else ''))
     rep.append('')
