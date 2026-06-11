@@ -85,6 +85,10 @@ class TestPlanGenerator:
                 targets.setdefault(no, []).append('選択肢追加')
             elif cat == '選択肢' and kind == '削除':
                 targets.setdefault(no, []).append('選択肢削除')
+            elif cat == '選択肢' and kind == '変更':
+                # 選択肢テキスト変更 (文字修正)。規格名計上の検証等のため軸に上げる
+                #   (step3 で最長テキストの選択肢1件に絞る = 新提案A)
+                targets.setdefault(no, []).append('選択肢テキスト変更')
         return targets
 
     @staticmethod
@@ -134,6 +138,33 @@ class TestPlanGenerator:
             return False
         extra_flags = [f for f in (sit.get('SitsumonFlags') or []) if f not in (105, 108)]
         return not extra_flags
+
+    def _all_rows_autoselect(self, sit):
+        """B-15: 選択可能行が全て AutoSelectJoken 条件付きの質問は、駆動変数が
+        ユーザ入力(JSON内未解決)でも実機では自動確定され、ユーザは直接選ばない。
+        例: 15 Sit11 日当り架設質量(トラッククレーン架設) = W の範囲表
+        (0<W<=20 / 20<W<=35 / 35<W<=60)。列に出すと誤解を招くため auto 扱い。"""
+        no = sit.get('SitsumonNo')
+        s019 = self.new_json.sitsumon019_by_no.get(no)
+        if not s019:
+            return False
+        sel = [r['RowID'] for r in s019.get('SitRows', [])
+               if r.get('Visible', True) and not r.get('IsFixed', False)]
+        if not sel:
+            return False
+        aj = {r['RowID']: (r.get('AutoSelectJoken') or {})
+              for r in s019.get('SitTabRows', [])}
+        if not all(aj.get(rid) for rid in sel):
+            return False
+        # 駆動変数が「数値入力質問(Kind17)が書く変数」の場合のみ auto。
+        #   実行時は上流のユーザ入力で必ず確定する範囲表 (例: 15 W/L2)。
+        #   駆動変数が空の計算表変数 (00 cs / 01 A3 / 06 FG / 02 FG2 等) は
+        #   質問自身の選択で値が決まる = ユーザが選ぶ質問 → 列に残す。
+        input_vars = {(e.get('VarName') or '').strip()
+                      for e in self.new_json.data.get('Sitsumon017', []) or []}
+        input_vars.discard('')
+        drv = {(aj[rid].get('VarName') or '').strip() for rid in sel}
+        return bool(drv) and all(v and v in input_vars for v in drv)
 
     def _is_kind8_echo(self, sit):
         """Kind=8 が「分岐の選択肢ごとのマスタ展開(エコー)」かどうか。
@@ -501,6 +532,47 @@ class TestPlanGenerator:
                     'forced_row_id': '',
                 })
 
+        # 選択肢追加経由で新規到達する質問を軸へ昇格 (#21 内径又は内空幅(各種))
+        #   ベースライン走査では到達しないため従来は軸に収集されなかった。
+        #   diff vary 質問の各選択行を forward 試行し、新規 visited を拾う。
+        #   (例: 21 側溝規格=各種(追加行) → Sit59(=Sit5のShortCut) が新規到達。
+        #    J2=0 で自動選択が成立せずユーザが選ぶ質問になる)
+        _probed = set()
+        for ax in vary_axes:
+            v_no = ax['sit']['SitsumonNo']
+            s019p = self.new_json.sitsumon019_by_no.get(v_no)
+            if not s019p or self.old_json is None:
+                continue
+            # 「追加された選択肢」の行だけ forward 試行する。既存選択肢経由で
+            #   到達する質問は旧版でも到達可能=今回の差分ではない (#12 で
+            #   クローラクレーン規格選択を誤昇格した教訓)。
+            old_s019p = self.old_json.sitsumon019_by_no.get(v_no)
+            old_rows_p = {r['RowID'] for r in (old_s019p.get('SitRows', [])
+                                               if old_s019p else [])
+                          if r.get('Visible', True) and not r.get('IsFixed', False)}
+            for r in s019p.get('SitRows', []):
+                if not r.get('Visible', True) or r.get('IsFixed', False):
+                    continue
+                if r['RowID'] in old_rows_p:
+                    continue
+                res_p = FlowWalker(self.new_json,
+                                   vary_selections={v_no: r['RowID']}).walk()
+                for sn_p in res_p.get('visited_sitsumons', []):
+                    if (sn_p in baseline_visited or sn_p in vary_sit_nos
+                            or sn_p in _probed):
+                        continue
+                    s2 = sit_by_no.get(sn_p)
+                    if not s2 or not self._is_ui_visible_axis(s2):
+                        continue
+                    _probed.add(sn_p)
+                    result_axes.append({
+                        'sit': s2,
+                        'kind': 'vary',
+                        'reason': '追加選択肢経由の新規到達(全選択肢網羅)',
+                        'forced_row_id': '',
+                    })
+        vary_sit_nos |= _probed
+
         seen = set(vary_sit_nos)
         for sn in self._baseline_visit_seq:
             if sn in seen:
@@ -542,6 +614,18 @@ class TestPlanGenerator:
             elif src == 'auto':
                 kind = 'auto'
                 reason = '自動選択(AutoSelectJoken)'
+            elif self._all_rows_autoselect(s):
+                # B-15: 全選択可能行が条件付き = ユーザが直接選ばない質問。
+                #   駆動変数(例 W)が未解決でも自動確定として列から除外する。
+                kind = 'auto'
+                reason = '自動確定 (全選択可能行がAutoSelectJoken付き・ユーザ選択なし)'
+            elif self._is_default_exec(s) and s.get('LevelVarName'):
+                # #21 FB: デフォルト実行 + レベル変数持ち (例: 側溝材料初期値区分
+                #   LE_ST) は「単価選択の初期値を切り替えるだけの機能質問」。
+                #   テスト変数ではないため列に出さない (自動確定扱い)。
+                #   ※レベル変数=3(必ず実行)は上の分岐で vary 済み。
+                kind = 'auto'
+                reason = '自動確定 (デフォルト実行+レベル変数: 単価選択の機能質問)'
             elif self._is_default_exec(s):
                 # J3: ExecKind=1 + Flags=[105]/[105,108]のみ + 数値入力でない = 純粋なデフォルト実行
                 #   SitsumonKind=17 (数値入力) は MinKigou≥1 で UI 可視 → ユーザ入力 → fix

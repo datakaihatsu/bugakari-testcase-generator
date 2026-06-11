@@ -7,7 +7,7 @@ AX-005,架設部材質量(標準60t/本以下),fix,5,架設部材質量(標準60t/本以下),,Sitsumon
 AX-006,主桁本数,fix,6,主桁本数,,SitsumonKind=17,
 AX-007,支承工の数量,fix,7,支承工の数量,,SitsumonKind=17,
 AX-008,桁の架設方法,fix,10,桁の架設方法,,SitsumonKind=19,
-AX-009,日当り架設質量(トラッククレーン架設),fix,11,日当り架設質量(トラッククレーン架設),,SitsumonKind=19,
+AX-009,日当り架設質量(トラッククレーン架設),auto,11,日当り架設質量(トラッククレーン架設)(固定),自動確定 (全選択可能行がAutoSelectJoken付き・ユーザ選択なし),SitsumonKind=19,
 AX-010,本締工の計上,fix,31,本締工の計上,,SitsumonKind=19,
 AX-011,横桁取付工,fix,33,横桁取付工,,SitsumonKind=17,
 AX-012,足場工の計上,fix,36,足場工の計上,,SitsumonKind=19,

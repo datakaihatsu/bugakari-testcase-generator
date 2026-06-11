@@ -55,6 +55,7 @@ class DiffExtractor:
         rows.extend(self._diff_keisan())
         rows.extend(self._diff_sitsumon())
         rows.extend(self._diff_sitsumon014())
+        rows.extend(self._diff_sitsumon011())
         rows.extend(self._diff_sitsumon017())
         rows.extend(self._diff_sitsumon019())
         rows.extend(self._diff_default_row())
@@ -222,6 +223,18 @@ class DiffExtractor:
                         '計算表', '変更', _fmt_id('計算表', raw_id),
                         name, str(old_tani), str(new_tani), '単位変更',
                     ])
+                # 名称(Mesho)の変更 (例: 13 ～機械経費→～機械経費加算額)
+                #   計算表名称は代価表の行名称として表示されるため文字修正の検証対象
+                #   VarName が空のコメント行(<…>等)は番号ずれで別行が来るため除外
+                old_mesho = (old_item.get('Mesho') or '').strip()
+                new_mesho = (item.get('Mesho') or '').strip()
+                has_var = bool((item.get('VarName') or '').strip())
+                if (same_var and has_var
+                        and old_mesho and new_mesho and old_mesho != new_mesho):
+                    rows.append([
+                        '計算表', '変更', _fmt_id('計算表', raw_id),
+                        name, old_mesho, new_mesho, '名称変更',
+                    ])
 
         for cd, item in sorted(old_map.items()):
             if cd not in new_map:
@@ -281,6 +294,53 @@ class DiffExtractor:
                     item.get('SitsumonVersion', ''),
                 ])
 
+        return rows
+
+    # ------------------------------------------------------------------
+    # 子代価呼び出し設定（Sitsumon011）― 送り変数(SendItemList)・計上先の変更
+    #   例: 15 質問No50 鉄筋工 F2削除/F7追加・計上先 28968→20301 (修正方針)
+    # ------------------------------------------------------------------
+
+    def _diff_sitsumon011(self):
+        rows = []
+        om = {e['SitsumonNo']: e for e in self.old.data.get('Sitsumon011', [])}
+        nm = {e['SitsumonNo']: e for e in self.new.data.get('Sitsumon011', [])}
+
+        def send_vars(e):
+            return [s.get('SendVarName') or s.get('CurVarName')
+                    for s in (e.get('SendItemList') or [])]
+
+        for no in sorted(set(om) | set(nm)):
+            name = (self.new.get_sitsumon_name(no) if no in nm
+                    else self.old.get_sitsumon_name(no))
+            o, n = om.get(no), nm.get(no)
+            if o and n:
+                ov, nv = send_vars(o), send_vars(n)
+                if ov != nv:
+                    added = [v for v in nv if v not in ov]
+                    removed = [v for v in ov if v not in nv]
+                    note = '子代価送り変数変更'
+                    if added:
+                        note += ' 追加:' + ','.join(added)
+                    if removed:
+                        note += ' 削除:' + ','.join(removed)
+                    rows.append([
+                        '質問設定', '変更', f'質問No:{no}', name,
+                        '/'.join(ov) or '-', '/'.join(nv) or '-', note,
+                    ])
+                for fld, label in (('KeijoSakiTankaCD', '子代価計上先変更'),
+                                   ('DefaultKoshuCD', '既定子代価変更')):
+                    if str(o.get(fld) or '') != str(n.get(fld) or ''):
+                        rows.append([
+                            '質問設定', '変更', f'質問No:{no}', name,
+                            str(o.get(fld) or '-'), str(n.get(fld) or '-'), label,
+                        ])
+            elif n:
+                rows.append(['質問設定', '追加', f'質問No:{no}', name,
+                             '-', '子代価呼出', ''])
+            else:
+                rows.append(['質問設定', '削除', f'質問No:{no}', name,
+                             '子代価呼出', '-', ''])
         return rows
 
     # ------------------------------------------------------------------
@@ -456,6 +516,42 @@ class DiffExtractor:
                     '選択肢', '削除', f'質問No:{no}',
                     sit_name, row_text(old_sit, row_id), '-', '',
                 ])
+
+            # 選択肢テキスト変更 (共通 RowID のセル文字列が変わった質問)
+            #   例: 12 機械区分(71/72)「山積」→「バケット容量」等の文字修正。
+            #   規格名計上(KikakuKeijoGaia9)を持つ質問では計上文字列に直結するため
+            #   検出必須 (フィードバック 2026-06-10 #12)。
+            if old_sit and new_sit:
+                old_cells = {(c['RowID'], c['ColID']): str(c.get('Value') or '')
+                             for c in old_sit.get('SitTabCells', [])}
+                new_cells = {(c['RowID'], c['ColID']): str(c.get('Value') or '')
+                             for c in new_sit.get('SitTabCells', [])}
+                col_ids = sorted({cid for (_, cid) in old_cells}
+                                 | {cid for (_, cid) in new_cells})
+                # 数値のみのセル変更(歩掛数値の年次改定 等)は「テキスト変更」に
+                #   しない (期待値検証でカバーされる。例: 19 バックホウの歩掛改定)。
+                #   非数値文字を含むセルの変更だけを文字修正とみなす。
+                import re as _re
+
+                def _textual(v):
+                    s = str(v).strip()
+                    return bool(s) and not _re.fullmatch(
+                        r'[-+0-9.,eE%~\s　()]*', s)
+                changed = []
+                for row_id in sorted(old_row_ids & new_row_ids):
+                    for cid in col_ids:
+                        a = old_cells.get((row_id, cid), '')
+                        b = new_cells.get((row_id, cid), '')
+                        if a != b and (_textual(a) or _textual(b)):
+                            changed.append(row_id)
+                            break
+                if changed:
+                    rid = changed[0]
+                    rows.append([
+                        '選択肢', '変更', f'質問No:{no}', sit_name,
+                        row_text(old_sit, rid), row_text(new_sit, rid),
+                        f'選択肢テキスト変更({len(changed)}行)',
+                    ])
 
         return rows
 

@@ -75,12 +75,19 @@ def run_folder(folder):
     else:
         new = js[0]
         plan = os.path.join(out_dir, 'step2.0_テスト計画.csv')
+        step3_cmd = [sys.executable, os.path.join(ROOT, '共通/step3_csv/generate_csv.py'),
+                     plan, new, os.path.join(out_dir, 'step3.0_テストケース.csv')]
+        # 参考JSON (input/参考/) があれば「文字のみの修正」の比較元として渡す
+        #   (#14: 複写元との文字比較観点。複数あれば日付が最新のもの)
+        refs = sorted(glob.glob(os.path.join(input_dir, '参考', '*.json')), key=_datekey)
+        mode = f'全パターン型 (新={os.path.basename(new)})'
+        if refs:
+            step3_cmd += ['--ref', refs[-1]]
+            mode += f' / 参考比較={os.path.basename(refs[-1])}'
         cmds = [
             [sys.executable, os.path.join(ROOT, '共通/step2_proposals/generate_proposals_new.py'), new, plan],
-            [sys.executable, os.path.join(ROOT, '共通/step3_csv/generate_csv.py'), plan, new,
-             os.path.join(out_dir, 'step3.0_テストケース.csv')],
+            step3_cmd,
         ]
-        mode = f'全パターン型 (新={os.path.basename(new)})'
     for cmd in cmds:
         r = subprocess.run(cmd, capture_output=True, text=True, encoding='utf-8',
                            errors='replace', cwd=ROOT)

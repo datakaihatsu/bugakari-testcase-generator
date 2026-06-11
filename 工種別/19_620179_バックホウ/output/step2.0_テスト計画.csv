@@ -1,6 +1,6 @@
 ²ID,²–¼,í•Ê,SitsumonNo,—ñƒ‰ƒxƒ‹,•ÏX——R,”õl,‹­§sID
 AX-001,’P‰¿•\”’lŒˆ’è•û–@,fix,90,’P‰¿•\”’lŒˆ’è•û–@,,SitsumonKind=19,
-AX-002,ğŒ‘I‘ğ,fix,2,ğŒ‘I‘ğ,,SitsumonKind=19,
+AX-002,ğŒ‘I‘ğ,fix,2,ğŒ‘I‘ğ,i‚è‚İ‚Å‹­§(vary“’BŒo˜H),SitsumonKind=19,6
 AX-003,{H•àŠ|,fix,141,{H•àŠ|,,SitsumonKind=19,
 AX-004,ğŒ‘I‘ğ,fix,6,ğŒ‘I‘ğ,,SitsumonKind=19,
 AX-005,{H•àŠ|,fix,159,{H•àŠ|,,SitsumonKind=19,
@@ -23,3 +23,4 @@ AX-021,“Áê‹KŠi‚ÌŠî‘b‰¿Ši‰ÁŒ¸Šz—L–³,fix,59,“Áê‹KŠi‚ÌŠî‘b‰¿Ši‰ÁŒ¸Šz—L–³,,Sitsumo
 AX-022,‰^“]˜J–±Eí,fix,62,‰^“]˜J–±Eí,,SitsumonKind=19,
 AX-023,”R—¿E“d—Í‹æ•ª,fix,64,”R—¿E“d—Í‹æ•ª,,SitsumonKind=19,
 AX-024,ğŒ‘I‘ğ,vary,75,ğŒ‘I‘ğ,‘I‘ğˆ’Ç‰Á,SitsumonKind=19,
+AX-025,{H•àŠ|,vary,143,{H•àŠ|,‘I‘ğˆƒeƒLƒXƒg•ÏX,SitsumonKind=19,

@@ -24,6 +24,7 @@
 import sys
 import os
 import csv
+import re
 import itertools
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'engine'))
@@ -36,9 +37,15 @@ S_VARS = ['S1', 'S2', 'S3', 'S4', 'S5']
 
 class ColumnTCGenerator:
 
-    def __init__(self, plan_csv_path, new_json_path, old_json_path=None):
+    def __init__(self, plan_csv_path, new_json_path, old_json_path=None,
+                 ref_json_path=None):
         self.new_json = BugakariJSON(new_json_path)
         self.old_json = BugakariJSON(old_json_path) if old_json_path else None
+        # 参考JSON (input/参考/)。全パターン型で「文字のみの修正」の比較元に使う
+        #   (#14: 複写元と比べて質問名/計算表名/選択肢テキストの文字修正観点を出す)。
+        #   旧JSONがある差分型では使わない。
+        self.ref_json = (BugakariJSON(ref_json_path)
+                         if (ref_json_path and old_json_path is None) else None)
         self.plan = self._load_plan(plan_csv_path)
         self._added_row_index_by_sit = self._detect_added_rows() if self.old_json else {}
 
@@ -155,7 +162,7 @@ class ColumnTCGenerator:
             row_id = sr.get('RowID')
             if not sr.get('Visible', True) or sr.get('IsFixed', False):
                 continue
-            text_display = cells.get((row_id, disp_col), '').replace('\r\n', ' ').strip() if disp_col else f'Row{row_id}'
+            text_display = self._strip_ref_code(cells.get((row_id, disp_col), '').replace('\r\n', ' ').strip()) if disp_col else f'Row{row_id}'
             # J4: 規格コード列の併記
             if value_col is not None:
                 value_part = str(cells.get((row_id, value_col), '')).strip()
@@ -180,6 +187,18 @@ class ColumnTCGenerator:
                 'value_col': value_col,
             })
         return result
+
+    # タブセルの選択肢文字列には編集用の参照コード注記 (例「【A=1】\r\n土留無」)
+    # が前置されることがある。これは内部メタ情報であり選択肢名ではないため除去する。
+    #   - 【…】 で始まり、直後に改行/空白が続くものを 1 個だけ剥がす。
+    #   - 注記の後ろに実体ラベル (土留無 等) が残る場合のみ剥がす (注記単独なら維持)。
+    _REF_CODE_RE = re.compile(r'^【[^】]*】[\s　]+(?=\S)')
+
+    @classmethod
+    def _strip_ref_code(cls, text):
+        if not text:
+            return text
+        return cls._REF_CODE_RE.sub('', str(text))
 
     def _option_texts(self, bj, sit_no):
         """質問の選択肢表示テキスト集合 (タブなしセル基準)。"""
@@ -232,7 +251,7 @@ class ColumnTCGenerator:
             return row['display']
         rid = row['row_id']
         text = self.new_json.cell_value_for_tab(sit019, rid, disp_col, active_tab)
-        text_display = str(text).replace('\r\n', ' ').strip() if text else ''
+        text_display = self._strip_ref_code(str(text).replace('\r\n', ' ').strip()) if text else ''
         value_col = row.get('value_col')
         if value_col is not None:
             vp = self.new_json.cell_value_for_tab(sit019, rid, value_col, active_tab)
@@ -300,6 +319,12 @@ class ColumnTCGenerator:
         for r in self.new_json.data.get('KikakuKeijoGaia9', []) or []:
             if r.get('SitsumonNo') == sitsumon_no:
                 return True
+        # ShortCut元の質問は ShortCut先の規格名計上設定を引き継ぐ (例: 21 Sit59→Sit5)
+        for s in self.new_json.data.get('SitsumonItem', []):
+            if (s.get('SitsumonNo') == sitsumon_no
+                    and s.get('ShortCutSitsumonNo')
+                    and s.get('ShortCutSitsumonNo') != sitsumon_no):
+                return self._has_kikaku_keijo(s['ShortCutSitsumonNo'])
         sit019 = self.new_json.sitsumon019_by_no.get(sitsumon_no)
         if not sit019:
             return False
@@ -308,6 +333,215 @@ class ColumnTCGenerator:
             if keijo and keijo != 0:
                 return True
         return False
+
+    def _ref_comparable(self):
+        """参考JSON(input/参考/)が「複写元」とみなせるか。
+        #14 のように複写して文字修正した工種だけ文字比較する。
+        #10 のように単なる設計参考(別工種)は構造が異なるため比較しない。
+        判定: 質問No集合・計算表CD集合の Jaccard 類似度がともに 0.9 以上。"""
+        if getattr(self, '_ref_comparable_cache', None) is not None:
+            return self._ref_comparable_cache
+        ok = False
+        if self.ref_json is not None:
+            # ID(質問No/計算表CD)は連番のため別工種でも一致してしまう。
+            # 「JSON再利用(複写/リネーム)」の判定は内容ベース:
+            #   ①質問No集合の Jaccard 類似度 0.8 以上 かつ
+            #   ②同一質問Noの表示名(Mesho)完全一致率 0.5 以上
+            #   (複写+文字修正なら大半の質問名は不変。別工種なら名前は揃わない)
+            rm = {s['SitsumonNo']: (s.get('Mesho') or '').strip()
+                  for s in self.ref_json.data.get('SitsumonItem', [])}
+            nm = {s['SitsumonNo']: (s.get('Mesho') or '').strip()
+                  for s in self.new_json.data.get('SitsumonItem', [])}
+            common = set(rm) & set(nm)
+            jac = len(common) / max(1, len(set(rm) | set(nm)))
+            named = [no for no in common if rm[no] or nm[no]]
+            same = sum(1 for no in named if rm[no] == nm[no])
+            name_ratio = same / max(1, len(named))
+            ok = jac >= 0.8 and name_ratio >= 0.5
+        self._ref_comparable_cache = ok
+        return ok
+
+    def _name_change_checks(self):
+        """文字のみの修正(質問表示名/計算表名称)の確認観点 (#13/#14)。
+        比較元: 差分型=旧JSON / 全パターン型=参考JSON(input/参考/)。
+        計算表名称(KeisanItem.Mesho)は代価表の行名称として表示されるため、
+        「代価表名称や規格名の文字修正」の検証対象。TC は増やさず観点のみ追記。"""
+        if getattr(self, '_name_change_cache', None) is not None:
+            return self._name_change_cache
+        base = self.old_json or (self.ref_json if self._ref_comparable() else None)
+        out = []
+        if base is not None:
+            import difflib
+
+            def _is_noise_name(nm):
+                # 変数式名(NFG1=1 / 0.4=代価表… 等)・終点マーカーは UI 名称でない
+                return (not nm) or ('=' in nm) or ('終点' in nm)
+
+            def _row_ids(bj, no):
+                s019 = bj.sitsumon019_by_no.get(no)
+                if not s019:
+                    return None
+                return frozenset(r['RowID'] for r in s019.get('SitRows', [])
+                                 if r.get('Visible', True)
+                                 and not r.get('IsFixed', False))
+
+            om = {s['SitsumonNo']: s for s in base.data.get('SitsumonItem', [])}
+            for s in self.new_json.data.get('SitsumonItem', []):
+                no = s['SitsumonNo']
+                o = om.get(no)
+                if not o:
+                    continue
+                nm = (s.get('Mesho') or '').strip()
+                onm_ = (o.get('Mesho') or '').strip()
+                if onm_ == nm or _is_noise_name(nm) or _is_noise_name(onm_):
+                    continue
+                # 番号ずれ(同じNoに別質問が来た)ガード:
+                #   同一Kind(UI質問 17/19 のみ) + Kind19は選択可能RowID集合一致 +
+                #   名称類似度 0.5 以上 (文字修正なら大部分が一致するはず)
+                if s.get('SitsumonKind') not in (17, 19):
+                    continue
+                if o.get('SitsumonKind') != s.get('SitsumonKind'):
+                    continue
+                if s.get('SitsumonKind') == 19 and                         _row_ids(base, no) != _row_ids(self.new_json, no):
+                    continue
+                if difflib.SequenceMatcher(None, onm_, nm).ratio() < 0.5:
+                    continue
+                out.append((no, f'・質問名「{nm}」と表示されているが、'
+                                f'外部設計と正しいか(文字修正)'))
+            # 代価表で積算者が見るのは「代価名」と「備考欄」のみ (#13 FB)。
+            #   計算表(KeisanItem)の名称は積算実行時に見えないため観点に出さない。
+            # (1) 代価名 (Daika.Mesho / DaikaTitle) の文字変更
+            odk = {d.get('DaikaHyoCD'): d for d in base.data.get('Daika', [])}
+            for d in self.new_json.data.get('Daika', []):
+                o = odk.get(d.get('DaikaHyoCD'))
+                if not o:
+                    continue
+                for fld in ('Mesho', 'DaikaTitle'):
+                    onm = (o.get(fld) or '').strip()
+                    nnm = (d.get(fld) or '').strip()
+                    if onm and nnm and onm != nnm:
+                        out.append((None, f'・代価名「{nnm}」と表示されているが、'
+                                          f'外部設計と正しいか(文字修正)'))
+                        break  # 同一代価表で Mesho/Title 両方は出さない
+                # 当り単位 (AtariTani) の変更 (#20 ため池堤体盛立工 m2→m3)。
+                #   同名代価表のみ比較 (番号ずれ防止。step1 と同基準)
+                if (o.get('Mesho') or '') == (d.get('Mesho') or ''):
+                    oa = (o.get('AtariTani') or '').strip()
+                    na = (d.get('AtariTani') or '').strip()
+                    if oa and na and oa != na:
+                        out.append((None, f'・代価表「{(d.get("Mesho") or "").strip()}」'
+                                          f'の当り単位「{na}」が外部設計と正しいか'
+                                          f'(単位変更。旧「{oa}」)'))
+            # (2) 代価表の備考欄 (DaikaItemLine.Biko) の文字変更
+            #   行の対応付け: 同一 DaikaItemCD 内の登場順。行数が同じ かつ
+            #   単価リンク(TankaLinkKeisanItemCD)・列(Column)が同じ行のみ比較
+            #   (行追加/削除のあった代価表は番号ずれするため対象外)。
+            def _lines_by_item(bj):
+                m = {}
+                for l in bj.data.get('DaikaItemLine', []):
+                    m.setdefault(l.get('DaikaItemCD'), []).append(l)
+                return m
+            olm, nlm = _lines_by_item(base), _lines_by_item(self.new_json)
+            seen_biko = set()
+            for cd, nls in nlm.items():
+                ols = olm.get(cd)
+                if not ols or len(ols) != len(nls):
+                    continue
+                for ol, nl in zip(ols, nls):
+                    if (ol.get('TankaLinkKeisanItemCD') != nl.get('TankaLinkKeisanItemCD')
+                            or ol.get('Column') != nl.get('Column')):
+                        continue
+                    ob = (ol.get('Biko') or '').strip()
+                    nb = (nl.get('Biko') or '').strip()
+                    if ob and nb and ob != nb and nb not in seen_biko:
+                        seen_biko.add(nb)
+                        out.append((None, f'・代価表の備考欄「{nb}」が外部設計と'
+                                          f'正しいか(文字修正)'))
+        self._name_change_cache = out
+        return out
+
+    def _child_daika_checks(self):
+        """新提案B (#15 FB): 子代価(Sitsumon011)へ送る変数の増減・計上先変更を
+        差分検知し、「子代価選択肢が意図通りか」の確認観点を出す。
+        例: 15 質問No50 鉄筋工 F2削除/F7追加・計上先 28968→20301。"""
+        if getattr(self, '_child_daika_cache', None) is not None:
+            return self._child_daika_cache
+        base = self.old_json or (self.ref_json if self._ref_comparable() else None)
+        out = []
+        if base is not None:
+            om = {e['SitsumonNo']: e for e in base.data.get('Sitsumon011', [])}
+
+            def send_vars(e):
+                return [s.get('SendVarName') or s.get('CurVarName')
+                        for s in (e.get('SendItemList') or [])]
+            for n in self.new_json.data.get('Sitsumon011', []):
+                no = n['SitsumonNo']
+                o = om.get(no)
+                if not o:
+                    continue
+                ov, nv = send_vars(o), send_vars(n)
+                added = [v for v in nv if v not in ov]
+                removed = [v for v in ov if v not in nv]
+                bits = []
+                if added:
+                    bits.append('追加:' + ','.join(added))
+                if removed:
+                    bits.append('削除:' + ','.join(removed))
+                keijo = (str(o.get('KeijoSakiTankaCD') or '')
+                         != str(n.get('KeijoSakiTankaCD') or ''))
+                if bits or keijo:
+                    nm = self.new_json.get_sitsumon_name(no)
+                    detail = ('送り変数の変更 ' + ' '.join(bits)) if bits else ''
+                    if keijo:
+                        detail = (detail + ' / ' if detail else '') + '計上先変更'
+                    out.append((no, f'・子代価「{nm}」の選択肢が意図通りか({detail})'))
+        self._child_daika_cache = out
+        return out
+
+    def _text_changed_sits(self):
+        """選択肢テキスト変更(共通RowIDのセル文字列が変わった)質問Noの集合。
+        step1 (extract_diff._diff_sitsumon019) と同基準。軸に上がらない自動確定
+        質問(例: 12 機械区分71=機械質量区分のエコー)でも、規格名計上を持つなら
+        確認観点を出すために step3 側でも検出する (フィードバック 2026-06-10)。"""
+        if getattr(self, '_text_changed_cache', None) is not None:
+            return self._text_changed_cache
+        result = set()
+        _base = self.old_json or (self.ref_json if self._ref_comparable() else None)
+        if _base is not None:
+            old_map = {s['SitsumonNo']: s
+                       for s in _base.data.get('Sitsumon019', [])}
+            for s in self.new_json.data.get('Sitsumon019', []):
+                no = s['SitsumonNo']
+                o = old_map.get(no)
+                if not o:
+                    continue
+                oc = {(x['RowID'], x['ColID']): str(x.get('Value') or '')
+                      for x in o.get('SitTabCells', [])}
+                nc = {(x['RowID'], x['ColID']): str(x.get('Value') or '')
+                      for x in s.get('SitTabCells', [])}
+                common = ({r['RowID'] for r in o.get('SitTabRows', [])}
+                          & {r['RowID'] for r in s.get('SitTabRows', [])})
+                cols = sorted({cid for _, cid in oc} | {cid for _, cid in nc})
+
+                def _textual(v):
+                    import re as _re
+                    sv = str(v).strip()
+                    return bool(sv) and not _re.fullmatch(
+                        r'[-+0-9.,eE%~\s　()]*', sv)
+                found = False
+                for rid in sorted(common):
+                    for cl in cols:
+                        a = oc.get((rid, cl), '')
+                        b = nc.get((rid, cl), '')
+                        if a != b and (_textual(a) or _textual(b)):
+                            found = True
+                            break
+                    if found:
+                        break
+                if found:
+                    result.add(no)
+        self._text_changed_cache = result
+        return result
 
     def _get_default_row(self, sitsumon_no, rows):
         for tab in self.new_json.data.get('SitTab', []):
@@ -408,14 +642,20 @@ class ColumnTCGenerator:
         同一フローに落ちる行(値だけ違う。例 鉄筋径)は代表1件に圧縮し、フローが
         分岐する行(例 作業内容の撤去)は各代表を残す。直積爆発を防ぎ分岐網羅は保つ。
         """
+        default = self._get_default_row(sit_no, rows)
         reps = []
-        seen_keys = set()
+        key_to_idx = {}
         for r in rows:
             res = FlowWalker(self.new_json, vary_selections={sit_no: r['row_id']}).walk()
             key = frozenset(res.get('visited_sitsumons', []))
-            if key not in seen_keys:
-                seen_keys.add(key)
+            if key not in key_to_idx:
+                key_to_idx[key] = len(reps)
                 reps.append(r)
+            elif default is not None and r['row_id'] == default['row_id']:
+                # B-16: 既定行(DefaultRowID)が属するフロー類の代表は既定行にする。
+                #   実機の既定選択と一致させる (例: 16 排ガス機械の選択 =
+                #   第3次基準値が既定なのに先頭行の未対策型が代表になっていた)。
+                reps[key_to_idx[key]] = r
         return reps if reps else (rows[:1] if rows else [])
 
     def generate(self):
@@ -447,6 +687,34 @@ class ColumnTCGenerator:
             if sn not in _visit_order:
                 _visit_order[sn] = idx
 
+        # 追加選択肢経由で新規到達する軸の列順 (#21 FB: 内径又は内空幅は
+        #   基礎砕石の有無の直前が正)。既定順走査では未訪問のため末尾に落ちる。
+        #   トリガー(追加選択肢)込みの走査列を使い、直前の既知質問の直後に置く。
+        _unplaced = [int(ax['SitsumonNo']) for ax in self.plan
+                     if '新規到達' in (ax.get('変更理由') or '')
+                     and int(ax['SitsumonNo']) not in _visit_order]
+        if _unplaced:
+            for _v_no, _a_idx in (self._added_row_index_by_sit or {}).items():
+                if not _unplaced:
+                    break
+                _rows_v = self._get_axis_rows(_v_no)
+                if not isinstance(_rows_v, list):
+                    continue
+                for _r in _rows_v[_a_idx:]:
+                    _seq2 = FlowWalker(
+                        self.new_json,
+                        vary_selections={_v_no: _r['row_id']},
+                    ).walk().get('visited_sitsumons', [])
+                    for _s_no in list(_unplaced):
+                        if _s_no not in _seq2:
+                            continue
+                        _pos = _seq2.index(_s_no)
+                        for _prev in reversed(_seq2[:_pos]):
+                            if _prev in _visit_order:
+                                _visit_order[_s_no] = _visit_order[_prev] + 0.5
+                                _unplaced.remove(_s_no)
+                                break
+
         def _axis_order_key(p):
             return _visit_order.get(int(p['SitsumonNo']), 10**9 + int(p['SitsumonNo']))
         axes_sorted = sorted(self.plan, key=_axis_order_key)
@@ -462,6 +730,37 @@ class ColumnTCGenerator:
             added_idx = self._added_row_index_by_sit.get(sit_no)
             if is_business_rule:
                 filtered = rows
+                added_set = set()
+            elif '新規到達' in reason:
+                # 選択肢追加経由で新規到達した質問: 旧版では到達不能だったため
+                #   実質「新規追加質問」 → 全選択肢を網羅 (#21 内径又は内空幅(各種))
+                filtered = rows
+                added_set = set()
+            elif ('選択肢テキスト変更' in reason
+                  and '選択肢追加' not in reason and '選択肢削除' not in reason
+                  and added_idx is None and self.old_json is not None):
+                # ※削除/追加と混在する軸はこの分岐に入れない (従来の flow_equiv
+                #   代表行を維持。例: 06 作業内容 / 11 工種区分 = 分岐網羅を優先)
+                # 新提案A: 文字修正のみの軸は「既定行 + 最長テキスト行」の2件。
+                #   最長行 = 規格名計上のNGモード(文字の欠落)検証用。
+                #   既定行を残すのは既存の既定経路TC(承認済みベースライン)を
+                #   維持するため (既定を外すと下流の分岐/auto質問が変わってしまう)。
+                # 最長行の候補は「テキストを含む表示」の行のみ
+                #   (数値・記号値のみの行(例 -9999999999)は文字検証に不適。#19)
+                def _is_texty(r):
+                    s = str(r.get('display') or '').strip()
+                    return bool(s) and not re.fullmatch(r'[-+0-9.,eE%~\s　()]*', s)
+                _texty_rows = [r for r in rows if _is_texty(r)]
+                longest = max(
+                    _texty_rows, key=lambda r: len(str(r.get('display') or ''))
+                ) if _texty_rows else None
+                default = self._get_default_row(sit_no, rows)
+                filtered = []
+                _seen_ids = set()
+                for r in (default, longest):
+                    if r and r['row_id'] not in _seen_ids:
+                        _seen_ids.add(r['row_id'])
+                        filtered.append(r)
                 added_set = set()
             elif self.old_json is not None and added_idx is None:
                 # 差分型で新規追加行なし = 選択肢削除/値変更のみ。削除選択肢は新JSONに
@@ -513,6 +812,20 @@ class ColumnTCGenerator:
                 combos = list(itertools.product(*[rs for _, rs in vary_row_lists]))
             else:
                 combos = [tuple()]
+
+            # 選択肢テキスト変更軸が複数あるとき、組合せは「全て既定行」or
+            #   「全て最長行」の2通りだけ残す (文字検証は1TCで足りる。
+            #   軸数分の直積爆発を防ぐ。例: 19 バックホウ 2^4=16 → 2)。
+            _tx_axes = []
+            for _i, (_ax, _rs) in enumerate(vary_row_lists):
+                _rsn = _ax.get('変更理由', '')
+                if ('選択肢テキスト変更' in _rsn and '選択肢追加' not in _rsn
+                        and '選択肢削除' not in _rsn and len(_rs) > 1):
+                    _tx_axes.append((_i, _rs[0]['row_id']))
+            if len(_tx_axes) > 1:
+                combos = [cb for cb in combos
+                          if len({cb[_i]['row_id'] == _d
+                                  for _i, _d in _tx_axes}) == 1]
 
             # G: 業務ルール vary 軸の「状態戻し回帰 TC」 1件追加
             num_diff_tcs = len(combos)
@@ -715,15 +1028,27 @@ class ColumnTCGenerator:
                 if int(ax['SitsumonNo']) not in tc_visited:
                     continue
                 reason = ax.get('変更理由', '')
-                is_diff_vary = ('新規追加質問' in reason) or ('選択肢追加' in reason)
+                # 規格名計上の発火対象: 新規質問・選択肢追加に加え、選択肢削除・
+                #   選択肢テキスト変更も含める
+                #   (選択肢が削除されると計上される規格名の集合が変わるため要確認。
+                #    例: 11 工種区分=選択肢削除で規格名計上が変化。
+                #    選択肢の文字修正は計上文字列に直結。例: 12 機械区分=文字修正)。
+                is_diff_vary = (('新規追加質問' in reason) or ('選択肢追加' in reason)
+                                or ('選択肢削除' in reason)
+                                or ('選択肢テキスト変更' in reason)
+                                or ('新規到達' in reason))
                 # 数値入力軸(SitsumonKind=17)は display='任意' のプレースホルダで、
                 # 「任意」は積算シミュレート時に表示されない固定文言にすぎない。
                 # この場合は「表示される質問が外部設計と正しいか」に統一する。
                 is_numeric_input = (chosen_row.get('display') == '任意' and chosen_row.get('row_id') == 0)
+                # 表示ラベルは列と同じ active-tab 解決を使う (複数タブ質問で、列は
+                #   基本表なのに確認テキストだけ別タブのラベルになる不整合を防ぐ。
+                #   例: 10 土留方式の種類 → 基本表「無し/自立式」が正)。
+                disp_label = self._display_for_tab(chosen_row, hyo) or chosen_row.get('display', '')
                 if is_numeric_input:
                     check_text = f'・{ax["軸名"]}（表示される質問）が外部設計と正しいか'
                 else:
-                    check_text = f'・「{chosen_row["display"]}」と表示されているが、外部設計と正しいか'
+                    check_text = f'・「{disp_label}」と表示されているが、外部設計と正しいか'
                 if self.old_json is None:
                     # 新規工種モード: 差分が無いため全選択肢を網羅。
                     #   各選択肢が外部設計通りか (表示・計上) を確認観点に。
@@ -741,11 +1066,40 @@ class ColumnTCGenerator:
                     deleted = self._deleted_options(int(ax['SitsumonNo']))
                     if deleted:
                         checks.append('・削除された選択肢(' + '、'.join(deleted) + ')が表示されないこと')
+                elif '選択肢テキスト変更' in reason:
+                    # 文字修正のみの軸: 最長選択肢で表示文字列を検証 (新提案A)
+                    checks.append(f'{ax["軸名"]}(選択肢文字修正)')
+                    checks.append(check_text)
+                elif '新規到達' in reason:
+                    checks.append(f'{ax["軸名"]}(追加選択肢経由の新規到達・全選択肢網羅)')
+                    checks.append(check_text)
                 # J2: 規格名計上の確認観点
                 #   - 修正対象 (差分検出 vary 軸) のみ
                 #   - JSON 上で KikakuKeijoNaiyo が設定されている軸のみ
                 if (is_diff_vary or self.old_json is None) and self._has_kikaku_keijo(int(ax['SitsumonNo'])):
-                    kikaku_checks.append(f'・{ax["軸名"]} の規格名計上が意図通りの場所に正しく計上されているか')
+                    if ('選択肢テキスト変更' in reason
+                            and '選択肢追加' not in reason
+                            and '選択肢削除' not in reason):
+                        # 新提案A: NG=文字の欠落 → 最長選択肢で計上文字列の欠落を検証
+                        kikaku_checks.append(
+                            f'・{ax["軸名"]} の規格名計上が意図通りの場所に正しく計上されているか'
+                            '(最長選択肢で検証・文字の欠落がないか)')
+                    else:
+                        kikaku_checks.append(f'・{ax["軸名"]} の規格名計上が意図通りの場所に正しく計上されているか')
+            # J2拡張: 軸に上がらない質問(自動確定エコー等)でも、選択肢テキスト
+            #   変更かつ規格名計上を持つ質問がこの TC で visited なら観点を出す
+            #   (例: 12 機械区分71 = 機械質量区分のエコー。軸=機械質量区分側を
+            #    変えると計上文字列が変わるため、文字の欠落検証が必要)。
+            _vary_sit_nos = {int(a['SitsumonNo']) for a, _ in vary_row_lists}
+            for _sn in sorted(self._text_changed_sits()):
+                if _sn in _vary_sit_nos or _sn not in tc_visited:
+                    continue
+                if not self._has_kikaku_keijo(_sn):
+                    continue
+                _nm = self.new_json.get_sitsumon_name(_sn)
+                kikaku_checks.append(
+                    f'・{_nm}(選択肢文字修正・自動確定) の規格名計上が意図通りの'
+                    '場所に正しく計上されているか(文字の欠落がないか)')
             # G: 状態戻し回帰TC の確認観点
             if tc_idx > num_diff_tcs and biz_rule_axis_idx is not None:
                 biz_ax = vary_row_lists[biz_rule_axis_idx][0]
@@ -764,8 +1118,19 @@ class ColumnTCGenerator:
             #   「追加された行と数量が外部設計に沿っているか」 を確認観点として出す。
             if self._has_added_daika():
                 checks.append('・追加された代価表行と数量(数率)が外部設計に沿っているか')
+            # 文字のみの修正(質問表示名/計算表名称)の確認観点 (#13/#14)
+            for _nc_sn, _nc_text in self._name_change_checks():
+                if _nc_sn is not None and _nc_sn not in tc_visited:
+                    continue
+                checks.append(_nc_text)
+            # 新提案B: 子代価の送り変数増減・計上先変更の確認観点 (#15)
+            for _cd_sn, _cd_text in self._child_daika_checks():
+                if _cd_sn not in tc_visited:
+                    continue
+                checks.append(_cd_text)
             row_data.append('\n'.join(checks))
-            row_data.append('\n'.join(kikaku_checks))
+            # 規格名計上に影響する検知が無い TC は「-」(確認不要の明示。#13/#14 FB)
+            row_data.append('\n'.join(kikaku_checks) or '-')
             # J4: 重複TC除去 (vary 軸がこの TC で到達しない場合、選択違いでも
             #     条件・期待値・確認観点が同一になる。同一行は1件に畳む)
             dup_key = tuple(row_data[1:])
@@ -790,8 +1155,10 @@ class ColumnTCGenerator:
         return s
 
 
-def run(plan_csv_path, new_json_path, output_path, old_json_path=None):
-    gen = ColumnTCGenerator(plan_csv_path, new_json_path, old_json_path)
+def run(plan_csv_path, new_json_path, output_path, old_json_path=None,
+        ref_json_path=None):
+    gen = ColumnTCGenerator(plan_csv_path, new_json_path, old_json_path,
+                            ref_json_path=ref_json_path)
     rows = gen.generate()
     BugakariJSON.write_csv(rows, output_path)
     n = len(rows) - 1
@@ -801,8 +1168,15 @@ def run(plan_csv_path, new_json_path, output_path, old_json_path=None):
 
 
 if __name__ == '__main__':
-    if len(sys.argv) < 4:
-        print('Usage: python generate_csv.py <plan_csv> <new_json> <output_csv> [old_json]')
+    _args = sys.argv[1:]
+    _ref = None
+    if '--ref' in _args:
+        _i = _args.index('--ref')
+        _ref = _args[_i + 1]
+        del _args[_i:_i + 2]
+    if len(_args) < 3:
+        print('Usage: python generate_csv.py <plan_csv> <new_json> <output_csv>'
+              ' [old_json] [--ref 参考json]')
         sys.exit(1)
-    old_json = sys.argv[4] if len(sys.argv) > 4 else None
-    run(sys.argv[1], sys.argv[2], sys.argv[3], old_json)
+    _old = _args[3] if len(_args) > 3 else None
+    run(_args[0], _args[1], _args[2], _old, _ref)

@@ -136,7 +136,12 @@ class NewKotsuPlanGenerator:
                 else:
                     plan.append([self._next_id(), name, 'vary', sn, name, '新規工種:全選択肢網羅', note, ''])
             else:
-                plan.append([self._next_id(), name, 'fix', sn, name, '', note, ''])
+                # 選択可能行が1件だけ = ユーザに選ぶ余地が無い選択質問。
+                #   到達しても実機では「自動確定」され UI 選択列にはならない
+                #   (例: 10 No18 労務費の適用。上流 No16/17 が条件自動で確定した
+                #    結果到達するが選択肢は1件のみ)。列に出さず auto 扱いにする。
+                plan.append([self._next_id(), name, 'auto', sn, f'{name}(固定)',
+                             '自動確定 (選択肢1件・選択の余地なし)', note, ''])
         return plan
 
 

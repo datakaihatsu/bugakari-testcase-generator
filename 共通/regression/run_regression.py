@@ -169,12 +169,22 @@ def run_target(t, log):
             cmds = [[sys.executable, str(ROOT / '共通/pipeline.py'),
                      str(d / 'input' / t['old']), str(d / 'input' / t['new']), str(out)]]
         else:  # new
+            step3_cmd = [sys.executable, str(ROOT / '共通/step3_csv/generate_csv.py'),
+                         str(out / 'step2.0_テスト計画.csv'), str(d / 'input' / t['new']),
+                         str(out / 'step3.0_テストケース.csv')]
+            # 参考JSON (input/参考/) があれば文字比較の比較元として渡す (run_koshu と同挙動)
+            import re as _re
+
+            def _datekey(path):
+                m = _re.findall(r'(\d{8})', os.path.basename(str(path)))
+                return m[-1] if m else ''
+            refs = sorted((d / 'input' / '参考').glob('*.json'), key=_datekey)
+            if refs:
+                step3_cmd += ['--ref', str(refs[-1])]
             cmds = [
                 [sys.executable, str(ROOT / '共通/step2_proposals/generate_proposals_new.py'),
                  str(d / 'input' / t['new']), str(out / 'step2.0_テスト計画.csv')],
-                [sys.executable, str(ROOT / '共通/step3_csv/generate_csv.py'),
-                 str(out / 'step2.0_テスト計画.csv'), str(d / 'input' / t['new']),
-                 str(out / 'step3.0_テストケース.csv')],
+                step3_cmd,
             ]
         for cmd in cmds:
             r = subprocess.run(cmd, capture_output=True, text=True,
