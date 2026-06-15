@@ -1,0 +1,10 @@
+軸ID,軸名,種別,SitsumonNo,列ラベル,変更理由,備考,強制行ID
+AX-001,桁区分,vary,2,桁区分,選択肢テキスト変更,SitsumonKind=19,
+AX-002,歩掛(プレテンションT桁、ポストテンション桁(床版桁除く),fix,3,歩掛(プレテンションT桁、ポストテンション桁(床版桁除く),,SitsumonKind=19,
+AX-003,資材計上区分,vary,13,資材計上区分,業務ルール: 資材計上区分の切替が代価表数量に影響,SitsumonKind=19,
+AX-004,生コンクリート小型車割増額の計上,auto,28,生コンクリート小型車割増額の計上(固定),"デフォルト実行 (SitsumonExecuteKind=1, SekisanEnv連動なし)",SitsumonKind=19,
+AX-005,生コンクリート冬期加熱費計上区分(標準=なし),auto,30,生コンクリート冬期加熱費計上区分(標準=なし)(固定),"デフォルト実行 (SitsumonExecuteKind=1, SekisanEnv連動なし)",SitsumonKind=19,
+AX-006,打設方法,fix,20,打設方法,,SitsumonKind=19,
+AX-007,埋設型枠計上区分,vary,35,埋設型枠計上区分,選択肢テキスト変更 / 選択肢追加,SitsumonKind=19,
+AX-008,10m3当りの埋設型枠使用数量,vary,38,10m3当りの埋設型枠使用数量,選択肢削除,SitsumonKind=17,
+AX-009,10m3当りの埋設型枠端部使用数量,vary,39,10m3当りの埋設型枠端部使用数量,選択肢削除,SitsumonKind=17,

@@ -48,6 +48,7 @@ class ColumnTCGenerator:
                          if (ref_json_path and old_json_path is None) else None)
         self.plan = self._load_plan(plan_csv_path)
         self._added_row_index_by_sit = self._detect_added_rows() if self.old_json else {}
+        self._intent_text = self._load_intent_text(new_json_path)
 
     def _detect_added_rows(self):
         result = {}
@@ -71,6 +72,42 @@ class ColumnTCGenerator:
                     result[sno] = idx
                     break
         return result
+
+    def _load_intent_text(self, new_json_path):
+        """修正方針.txt を読む (new_json と同じ input ディレクトリ。壊れバイトは置換)。"""
+        import os
+        if not new_json_path:
+            return ''
+        p = os.path.join(os.path.dirname(new_json_path), '修正方針.txt')
+        try:
+            with open(p, encoding='utf-8', errors='replace') as fh:
+                return fh.read()
+        except Exception:
+            return ''
+
+    def _intent_check_text(self, mesho):
+        """修正方針の本文から、その軸(質問名)に対応する確認観点を生成する。
+        固定文ではなく方針文から導く。例:
+          『「X1:目地の種類」ごとに必要な資材の動作になるようフローを見直し』
+          → 『・「X1:目地の種類」ごとに必要な資材の動作になっているか』
+        指示文(〜になるよう〜見直し/〜してください/〜する 等)を検証形へ変換する。
+        """
+        import re
+        text = getattr(self, '_intent_text', '') or ''
+        if not text or not mesho:
+            return None
+        keywords = ('ごと', 'それぞれ', '種類別', '毎',
+                    'フロー見直', 'フローを見直', '分岐', 'パターン')
+        for raw in text.splitlines():
+            line = raw.strip().lstrip('・*-•　 ')
+            cmp = line.replace('「', '').replace('」', '')
+            if mesho in cmp and any(k in cmp for k in keywords):
+                idx = line.find('になるよう')
+                if idx != -1:
+                    return '・' + line[:idx] + 'になっているか'
+                t = re.sub(r'(を)?(見直[しすせ]?|見直す|修正(する)?|対応(する)?|反映(する)?|してください|する)\s*$', '', line).rstrip('、。 ')
+                return '・' + t + 'が修正方針どおりか'
+        return None
 
     def _load_plan(self, path):
         with open(path, encoding='cp932', newline='') as f:
@@ -658,6 +695,113 @@ class ColumnTCGenerator:
                 reps[key_to_idx[key]] = r
         return reps if reps else (rows[:1] if rows else [])
 
+    def _reach_chain(self, target_sit, base_forced, gate_sits, max_depth=4, budget=2500):
+        """target_sit を visited にする選択チェーンを前方探索で求める (multi-step)。
+        ゲート候補は gate_sits (= vary 軸の SitsumonNo 集合) に限定する。
+        これにより非vary軸を forced_rows にグローバル適用する副作用を排除する。
+        新質問を開く選択のみ再帰(貪欲)。多段ゲート対応
+        (例: 桁区分=床版桁 → 埋設型枠計上=する → 使用数量)。
+        見つかれば base_forced からの追加選択 dict を返す。無ければ None。"""
+        calls = [0]
+        def visited(sels):
+            calls[0] += 1
+            return set(FlowWalker(self.new_json, vary_selections=sels)
+                       .walk().get('visited_sitsumons', []))
+        found = {}
+        def dfs(sels, vis, depth, seen):
+            if target_sit in vis:
+                found.clear(); found.update(sels); return True
+            if depth <= 0 or calls[0] > budget:
+                return False
+            for sn in sorted(vis):
+                if sn in sels or sn not in gate_sits:
+                    continue
+                sit = self.new_json.sitsumon_by_no.get(sn)
+                if not sit or sit.get('SitsumonKind') != 19:
+                    continue
+                s019 = self.new_json.sitsumon019_by_no.get(sn)
+                if not s019:
+                    continue
+                rws = [r['RowID'] for r in s019.get('SitRows', [])
+                       if r.get('Visible', True) and not r.get('IsFixed', False)]
+                if len(rws) < 2:
+                    continue
+                for rid in rws:
+                    if calls[0] > budget:
+                        return False
+                    ns = dict(sels); ns[sn] = rid
+                    key = tuple(sorted(ns.items()))
+                    if key in seen:
+                        continue
+                    seen.add(key)
+                    nv = visited(ns)
+                    if target_sit in nv or (nv - vis):
+                        if dfs(ns, nv, depth - 1, seen):
+                            return True
+            return False
+        base_vis = visited(dict(base_forced))
+        if dfs(dict(base_forced), base_vis, max_depth, set()):
+            return {k: v for k, v in found.items() if base_forced.get(k) != v}
+        return None
+
+    def _compute_reach_combos(self, vary_row_lists, forced_rows):
+        """到達しない vary 軸のうち『修正方針が言及している軸』だけを対象に、
+        到達チェーン(ゲートは vary 軸に限定)を求め、到達用 combo の override を返す。
+        副作用を持たない: forced_rows は変更しない / 既存 combo は触らない(純加算)。
+        戻り値: (default_rows, [override_dict, ...])。override は {vary軸index: row}。"""
+        if not vary_row_lists:
+            return [], []
+        axis_sit = [int(ax['SitsumonNo']) for ax, _ in vary_row_lists]
+        gate_sits = set(axis_sit)
+        default_rows = [rs[0] for _, rs in vary_row_lists]
+        intent = getattr(self, '_intent_text', '') or ''
+        def referenced(mesho):
+            # 方針本文と質問名が長さ>=4の部分文字列を共有するか(=方針が触れている)
+            m = (mesho or '')
+            for i in range(len(m) - 3):
+                if m[i:i+4] in intent:
+                    return True
+            return False
+        def base_visited():
+            sels = dict(forced_rows)
+            for s_, r in zip(axis_sit, default_rows):
+                sels[s_] = r['row_id']
+            return set(FlowWalker(self.new_json, vary_selections=sels)
+                       .walk().get('visited_sitsumons', []))
+        bvis = base_visited()
+        specs = []
+        for i, (ax, rs) in enumerate(vary_row_lists):
+            sit = axis_sit[i]
+            if sit in bvis:
+                continue
+            if not referenced(ax.get('軸名') or ''):
+                continue  # 方針が言及していない軸は到達させない(他工種への波及防止)
+            chain = self._reach_chain(sit, forced_rows, gate_sits)
+            if not chain:
+                continue
+            sels = dict(forced_rows)
+            for gsn, grid in chain.items():
+                sels[gsn] = grid   # ゲートは vary 軸のみ → combo override で表現
+            sels[sit] = rs[0]['row_id']
+            res = FlowWalker(self.new_json, vary_selections=sels).walk()
+            if sit not in set(res.get('visited_sitsumons', [])):
+                continue
+            sit_sel = res.get('sit_selections', {})
+            ov = {}
+            for j, sj in enumerate(axis_sit):
+                rid = sit_sel.get(sj)
+                if rid is None:
+                    continue
+                rowobj = self._get_row_by_id(self._get_axis_rows(sj), rid)
+                if rowobj is not None:
+                    ov[j] = rowobj
+            ov[i] = rs[0]
+            specs.append(ov)
+        if specs:
+            print(f'  [multi-step到達] {len(specs)}件の到達用comboを追加(方針言及軸)')
+        return default_rows, specs
+
+
     def generate(self):
         vary_axes = [ax for ax in self.plan if ax['種別'] == 'vary']
         fix_or_auto_axes = [ax for ax in self.plan if ax['種別'] in ('fix', 'auto')]
@@ -714,6 +858,42 @@ class ColumnTCGenerator:
                                 _visit_order[_s_no] = _visit_order[_prev] + 0.5
                                 _unplaced.remove(_s_no)
                                 break
+
+        # multi-step到達でのみ到達する vary 軸の列順 (#27 埋設型枠系)。
+        #   スコープは _compute_reach_combos と同一: 「修正方針が言及している軸」かつ
+        #   「既定combo(forced+各軸既定行)で未到達」のみ。これにより通常の直積で到達する
+        #   軸(例 #22 振動ローラ=混合深さdeep。方針は半角ﾛｰﾗでMesho全角ローラと不一致)は
+        #   対象外となり、既存工種の列順を変えない。
+        _vary_sits_for_order = {int(ax['SitsumonNo']) for ax in self.plan
+                                if ax.get('種別') == 'vary'}
+        _intent_o = getattr(self, '_intent_text', '') or ''
+        def _ref_o(m):
+            m = m or ''
+            return any(m[i:i+4] in _intent_o for i in range(len(m) - 3))
+        _base_def_o = set(FlowWalker(self.new_json, vary_selections=dict(forced_rows))
+                          .walk().get('visited_sitsumons', []))
+        for _ax_o in self.plan:
+            if _ax_o.get('種別') != 'vary':
+                continue
+            _s_no = int(_ax_o['SitsumonNo'])
+            if _s_no in _visit_order or _s_no in _base_def_o:
+                continue
+            if not _ref_o(_ax_o.get('軸名') or ''):
+                continue
+            _chain = self._reach_chain(_s_no, dict(forced_rows), _vary_sits_for_order)
+            if not _chain:
+                continue
+            _sels_o = dict(forced_rows); _sels_o.update(_chain)
+            _seq3 = FlowWalker(self.new_json,
+                               vary_selections=_sels_o).walk().get('visited_sitsumons', [])
+            _here = [x for x in _seq3
+                     if x in _vary_sits_for_order and x not in _visit_order]
+            for _s2 in _here:
+                _pos = _seq3.index(_s2)
+                for _prev in reversed(_seq3[:_pos]):
+                    if _prev in _visit_order:
+                        _visit_order[_s2] = _visit_order[_prev] + 0.01
+                        break
 
         def _axis_order_key(p):
             return _visit_order.get(int(p['SitsumonNo']), 10**9 + int(p['SitsumonNo']))
@@ -776,12 +956,21 @@ class ColumnTCGenerator:
                 filtered = self._flow_equiv_rows(sit_no, rows)
                 added_set = set()
             else:
-                filtered = rows[added_idx:]
                 old_s = self.old_json.sitsumon019_by_no.get(sit_no) if self.old_json else None
                 old_set = set(
                     r['RowID'] for r in (old_s.get('SitRows', []) if old_s else [])
                     if r.get('Visible', True) and not r.get('IsFixed', False)
                 )
+                # 選択肢追加軸でも「フロー不変(値だけ違う＝共通サブルーチン的)」な
+                #   追加選択肢は代表1件に集約する (#16/フロー分岐基準と同一思想。
+                #   排ガス機械の選択など単価のみ変化しフローを分岐しない軸は全網羅が過剰)。
+                #   フローを分岐する追加選択肢は _flow_equiv_rows が各代表を残す。
+                #   集約後に追加行が1件も残らない場合 (代表が既存行) は、追加検証の
+                #   ため追加行の先頭を1件残す (差分TC・選択肢適切さ観点を維持)。
+                added_rows = rows[added_idx:]
+                filtered = self._flow_equiv_rows(sit_no, added_rows)
+                if not any(r['row_id'] not in old_set for r in filtered) and added_rows:
+                    filtered = filtered + [added_rows[0]]
                 added_set = set(r['row_id'] for r in filtered if r['row_id'] not in old_set)
             vary_row_lists.append((ax, filtered))
             vary_added_rows[ax['軸ID']] = added_set
@@ -807,6 +996,8 @@ class ColumnTCGenerator:
         #   組合せ・列から除去して再構築する (到達しない軸での TC 増殖と
         #   無意味な確認観点を防ぐ。例: 06 の 作業内容(別分岐) / 労務費の適用)。
         for _pass in range(2):
+            _reach_default_rows, _reach_specs = self._compute_reach_combos(
+                vary_row_lists, forced_rows)
             # cartesian
             if vary_row_lists:
                 combos = list(itertools.product(*[rs for _, rs in vary_row_lists]))
@@ -827,6 +1018,17 @@ class ColumnTCGenerator:
                           if len({cb[_i]['row_id'] == _d
                                   for _i, _d in _tx_axes}) == 1]
 
+            # multi-step到達用 combo を明示追加 (直積/剪定に依存せず必ず到達枝を1本含める)。
+            #   到達comboは変更(方針言及軸)を exercise する差分TC。num_diff_tcs より前に
+            #   入れて、テスト区分=差分/回帰 を内容で判定させる(状態戻し回帰の後ろ扱いにしない)。
+            for _ov in _reach_specs:
+                _rc = list(_reach_default_rows)
+                for _gi, _r in _ov.items():
+                    if 0 <= _gi < len(_rc):
+                        _rc[_gi] = _r
+                if len(_rc) == len(vary_row_lists):
+                    combos.append(tuple(_rc))
+
             # G: 業務ルール vary 軸の「状態戻し回帰 TC」 1件追加
             num_diff_tcs = len(combos)
             biz_rule_axis_idx = None
@@ -840,6 +1042,7 @@ class ColumnTCGenerator:
                 if biz_rows:
                     regression_combo[biz_rule_axis_idx] = biz_rows[0]
                 combos.append(tuple(regression_combo))
+
 
             # 全 TC walker
             tc_walks = []
@@ -924,6 +1127,27 @@ class ColumnTCGenerator:
                   + ', '.join(ax['軸名'] for ax in col_excluded))
 
         headers, s_present = self._build_headers(axes_columns)
+        # Fix1: 同名の並行分岐質問(別SitsumonNo・同一表示名)を1列に統合する。
+        #   旧→新で質問番号が振り直され、混合深さ等で機械計上の質問セットが
+        #   浅用/深用に枝分かれするケース(例: (タイヤローラ)排ガス機械の選択 が
+        #   No30 浅用 / No35 深用)。step2 が一方しか軸化できないため、列のSitが
+        #   未到達でも同名の別Sitが到達していればその代表行を表示する。
+        col_sibling_sits = {}
+        for ax in axes_columns:
+            _sno = int(ax['SitsumonNo'])
+            _self_sit = self.new_json.sitsumon_by_no.get(_sno) or {}
+            _label = _self_sit.get('Mesho')
+            if not _label:
+                continue
+            _sibs = []
+            for _it in self.new_json.data.get('SitsumonItem', []):
+                _n = _it.get('SitsumonNo')
+                if _n is None or _n == _sno:
+                    continue
+                if _it.get('SitsumonKind') == 19 and _it.get('Mesho') == _label:
+                    _sibs.append(_n)
+            if _sibs:
+                col_sibling_sits[ax['軸ID']] = _sibs
         out_rows = []
         seen_tc_keys = set()
         s_to_row = {f'S{i}': i for i in range(1, 40)}
@@ -991,14 +1215,24 @@ class ColumnTCGenerator:
             row_data = [tc_id, test_kind]
             # J1: TC ごとに、その vary 軸が訪問されない場合は "-" 表記
             tc_visited = tcw_data['visited']
+            _closed_set = tcw_data.get('closed', ())
             for ax in axes_columns:
                 sit_no = int(ax['SitsumonNo'])
                 row = chosen_rows_by_ax.get(ax['軸ID'])
-                if sit_no not in tc_visited or sit_no in tcw_data.get('closed', ()):
-                    # この TC では訪問されない/レベル変数で閉じて自動確定 (= UI 非表示)
-                    row_data.append('-')
-                else:
+                if sit_no in tc_visited and sit_no not in _closed_set:
                     row_data.append(self._display_for_tab(row, hyo) if row else '')
+                    continue
+                # Fix1: 自Sitが未到達でも同名の並行分岐質問(別Sit)が到達していれば
+                #   その代表行(既定行)を表示する。
+                _shown = None
+                for _sib in col_sibling_sits.get(ax['軸ID'], []):
+                    if _sib in tc_visited and _sib not in _closed_set:
+                        _sib_rows = self._get_axis_rows(_sib)
+                        _sib_row = self._get_default_row(_sib, _sib_rows)
+                        _shown = (self._display_for_tab(_sib_row, hyo) if _sib_row else '')
+                        break
+                # この TC では訪問されない/レベル変数で閉じて自動確定 (= UI 非表示)
+                row_data.append(_shown if _shown is not None else '-')
 
             for v in s_present:
                 row_no = s_to_row.get(v)
@@ -1073,6 +1307,10 @@ class ColumnTCGenerator:
                 elif '新規到達' in reason:
                     checks.append(f'{ax["軸名"]}(追加選択肢経由の新規到達・全選択肢網羅)')
                     checks.append(check_text)
+                elif reason.startswith('修正方針:'):
+                    # 修正方針の文面から確認観点を生成 (フロー見直し起点の軸)
+                    _ck = self._intent_check_text(ax['軸名'])
+                    checks.append(_ck if _ck else check_text)
                 # J2: 規格名計上の確認観点
                 #   - 修正対象 (差分検出 vary 軸) のみ
                 #   - JSON 上で KikakuKeijoNaiyo が設定されている軸のみ

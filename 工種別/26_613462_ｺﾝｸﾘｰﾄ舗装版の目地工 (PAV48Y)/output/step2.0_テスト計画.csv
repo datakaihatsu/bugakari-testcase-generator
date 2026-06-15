@@ -1,0 +1,9 @@
+軸ID,軸名,種別,SitsumonNo,列ラベル,変更理由,備考,強制行ID
+AX-001,代価表の当り数量,auto,10,代価表の当り数量(固定),"デフォルト実行 (SitsumonExecuteKind=1, SekisanEnv連動なし)",SitsumonKind=19,
+AX-002,労務単価修正係数,fix,1,労務単価修正係数,,SitsumonKind=17,
+AX-003,歩掛修正係数,fix,14,歩掛修正係数,,SitsumonKind=17,
+AX-004,X1:目地の種類,vary,9,X1:目地の種類,修正方針: 質問名＋(ごと/フロー見直し等)の記述によりvary昇格,SitsumonKind=19,
+AX-005,資材計上区分,vary,23,資材計上区分,業務ルール: 資材計上区分の切替が代価表数量に影響,SitsumonKind=19,
+AX-006,X2:ダウエルバー計上方法選択,fix,13,X2:ダウエルバー計上方法選択,,SitsumonKind=19,
+AX-007,X3:チェアー計上方法選択,fix,17,X3:チェアー計上方法選択,,SitsumonKind=19,
+AX-008,チェアー材料費の単位選択,fix,21,チェアー材料費の単位選択,,SitsumonKind=19,

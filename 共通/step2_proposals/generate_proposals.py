@@ -51,6 +51,8 @@ class TestPlanGenerator:
         self.diff_rows = self._load_diff(diff_csv_path) if diff_csv_path else []
         self._counter = 0
         self.global_rules = load_global_rules()
+        self.new_json_path = new_json_path
+        self._intent_text = self._load_intent(new_json_path)
         self._baseline_visited = None
         self._baseline_visit_seq = None
         self._baseline_scope = None
@@ -61,6 +63,18 @@ class TestPlanGenerator:
             return []
         with open(path, encoding='cp932', newline='') as f:
             return list(csv.DictReader(f))
+
+    def _load_intent(self, new_json_path):
+        """修正方針.txt を読む (new_json と同じ input ディレクトリ)。壊れバイトは置換。"""
+        import os
+        if not new_json_path:
+            return ''
+        p = os.path.join(os.path.dirname(new_json_path), '修正方針.txt')
+        try:
+            with open(p, encoding='utf-8', errors='replace') as f:
+                return f.read()
+        except Exception:
+            return ''
 
     def _next_id(self):
         self._counter += 1
@@ -669,6 +683,7 @@ class TestPlanGenerator:
         result_axes = deduped
 
         self._apply_axis_behaviors(result_axes)
+        self._apply_intent_driven_vary(result_axes)
         self._excluded_targets = excluded_targets
         return result_axes
 
@@ -692,6 +707,51 @@ class TestPlanGenerator:
                     if ax['kind'] != 'vary':
                         ax['kind'] = 'vary'
                         ax['reason'] = f'業務ルール: {axis_name}の切替が代価表数量に影響'
+
+    def _apply_intent_driven_vary(self, axes):
+        """修正方針が「<質問名>」ごと/それぞれ… と明示した質問を vary 昇格する。
+        自由文依存のため条件は厳格にし、回帰工種への誤爆を防ぐ:
+          (1) 「」括り内が実在の質問名(SitsumonItem.Mesho)と完全一致
+          (2) 同じ行に per-value キーワード(ごと/それぞれ/種類別/毎)がある
+          (3) その質問が UI可視・選択可能行>=2
+        例: #26『「X1:目地の種類」ごとに必要な資材を計上する』→ 目地の種類を vary。
+        """
+        text = self._intent_text or ''
+        if not text:
+            return
+        # フロー見直し/種類ごと を示唆する語。括弧(「」)には依存しない。
+        keywords = ('ごと', 'それぞれ', '種類別', '毎',
+                    'フロー見直', 'フローを見直', '分岐', 'パターン')
+        # vary 候補になりうる質問(UI可視・選択行>=2・名前長>=4)を集める。
+        #   名前長>=4 は短い汎用語の偶発一致を防ぐガード。
+        cand = []
+        for it in self.new_json.data.get('SitsumonItem', []):
+            m = it.get('Mesho') or ''
+            if len(m) < 4 or it.get('SitsumonKind') not in (17, 19):
+                continue
+            if not self._is_ui_visible_axis(it):
+                continue
+            s019 = self.new_json.sitsumon019_by_no.get(it.get('SitsumonNo'))
+            rows = [r for r in (s019.get('SitRows', []) if s019 else [])
+                    if r.get('Visible', True) and not r.get('IsFixed', False)]
+            if len(rows) >= 2:
+                cand.append((m, it.get('SitsumonNo')))
+        # 本文を行単位で見て「実在の質問名が出現 かつ キーワード共起(同一行)」を vary 化。
+        #   括弧は除去してから素の部分一致で照合する(「」の有無に依存しない)。
+        targets = set()
+        for raw in text.splitlines():
+            line = raw.replace('「', '').replace('」', '')
+            if not any(k in line for k in keywords):
+                continue
+            for m, no in cand:
+                if m in line:
+                    targets.add(no)
+        if not targets:
+            return
+        for ax in axes:
+            if ax['sit'].get('SitsumonNo') in targets and ax['kind'] != 'vary':
+                ax['kind'] = 'vary'
+                ax['reason'] = '修正方針: 質問名＋(ごと/フロー見直し等)の記述によりvary昇格'
 
     def generate(self):
         axes = self._collect_axes()

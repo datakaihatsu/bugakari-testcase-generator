@@ -1,0 +1,153 @@
+<!-- 精度検証フェーズ バーンダウン (#22〜#50 / 目標 6-30 までに #50 到達) -->
+<div id="bd-root" style="font-family:'Segoe UI',Meiryo,sans-serif;color:#1f2937;max-width:980px;margin:0 auto;padding:16px;">
+  <div style="display:flex;justify-content:space-between;align-items:flex-end;flex-wrap:wrap;gap:8px;margin-bottom:8px;">
+    <div>
+      <div style="font-size:20px;font-weight:700;">バーンダウン｜精度検証フェーズ #22〜#50</div>
+      <div style="font-size:13px;color:#6b7280;">目標：6/30 までに #50 到達（#22〜#50＝29工種）。#51〜#57 はバッファ。</div>
+    </div>
+    <div id="bd-stats" style="font-size:13px;text-align:right;color:#374151;"></div>
+  </div>
+
+  <div style="background:#fff;border:1px solid #e5e7eb;border-radius:10px;padding:12px 12px 4px;">
+    <canvas id="bdChart" height="150"></canvas>
+  </div>
+
+  <div style="margin-top:14px;display:flex;gap:18px;flex-wrap:wrap;align-items:flex-start;">
+    <div style="flex:1;min-width:300px;">
+      <div style="font-weight:600;margin-bottom:6px;">工種ステータス（#22〜#50）</div>
+      <div id="bd-grid" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:4px;font-size:12px;"></div>
+    </div>
+    <div style="min-width:220px;font-size:12px;color:#4b5563;">
+      <div style="font-weight:600;margin-bottom:6px;color:#1f2937;">凡例・メモ</div>
+      <div style="display:flex;align-items:center;gap:6px;margin-bottom:4px;"><span style="width:22px;height:0;border-top:2px dashed #9ca3af;display:inline-block;"></span>目標線（理想バーンダウン）</div>
+      <div style="display:flex;align-items:center;gap:6px;margin-bottom:4px;"><span style="width:22px;height:0;border-top:2px dashed #f59e0b;display:inline-block;"></span>消化予測（実績ペースの外挿）</div>
+      <div style="display:flex;align-items:center;gap:6px;margin-bottom:8px;"><span style="width:22px;height:0;border-top:3px solid #2563eb;display:inline-block;"></span>実績（残工種数）</div>
+      <div>・「消化」＝合格 or スキップ。</div>
+      <div>・スキップ候補：#43/#44/#45/#54（潜水士船・機械損料系）。</div>
+      <div>・方針空（添付転記要）：#34/#36/#37/#39/#43/#44/#45/#54。</div>
+      <div>・外部依存：#35（#602761修正後・SS参照）。</div>
+      <div style="margin-top:6px;">・#51〜#57 はバッファ（50工種到達のための予備）。</div>
+    </div>
+  </div>
+  <div style="margin-top:10px;font-size:11px;color:#9ca3af;">最終更新：2026-06-15（#22 合格化時点）</div>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+<script>
+(function(){
+  // ---- 工種データ（#22〜#50＝29工種）。status: done / skip / pending ----
+  var items = [
+    {no:22,name:'路上路盤再生工',status:'done',date:'2026-06-15'},
+    {no:23,name:'輸送費(仮設材)',status:'done',date:'2026-06-15'},
+    {no:24,name:'表層(歩道部)被災地',status:'skip',date:'2026-06-15'},
+    {no:25,name:'現場打ち水路(本体)',status:'done',date:'2026-06-15'},
+    {no:26,name:'目地工',status:'done',date:'2026-06-15'},
+    {no:27,name:'横組ｺﾝｸﾘｰﾄ工',status:'done',date:'2026-06-15'},
+    {no:28,name:'PC板仮置工',status:'pending'},
+    {no:29,name:'PC板敷設工',status:'pending'},
+    {no:30,name:'型枠工(覆工)',status:'pending'},
+    {no:31,name:'防音扉設置撤去',status:'pending'},
+    {no:32,name:'小口径管布設',status:'pending'},
+    {no:33,name:'ﾎﾟﾘｴﾁﾚﾝ管据付',status:'pending'},
+    {no:34,name:'反転引込工',status:'pending'},
+    {no:35,name:'ﾓﾙﾀﾙ上塗工',status:'pending'},
+    {no:36,name:'床版補強等足場',status:'pending'},
+    {no:37,name:'ｼｰﾘﾝｸﾞ',status:'pending'},
+    {no:38,name:'FEP敷設',status:'pending'},
+    {no:39,name:'工場塗装',status:'pending'},
+    {no:40,name:'小型不整地運搬車',status:'pending'},
+    {no:41,name:'既製ｺﾝｸﾘｰﾄ杭打工',status:'pending'},
+    {no:42,name:'解析等調査業務費',status:'pending'},
+    {no:43,name:'捨石本均し(潜水)',status:'pending'},
+    {no:44,name:'ﾌﾞﾛｯｸ転置',status:'pending'},
+    {no:45,name:'ﾌﾞﾛｯｸ据付',status:'pending'},
+    {no:46,name:'異形ﾌﾞﾛｯｸ製作',status:'pending'},
+    {no:47,name:'ﾀｲﾀﾞｳﾝﾘﾝｸﾞ設置工',status:'pending'},
+    {no:48,name:'接地極工事',status:'pending'},
+    {no:49,name:'削り取り',status:'pending'},
+    {no:50,name:'ﾌﾞﾛｯｸ積込運搬据付',status:'pending'}
+  ];
+  var TOTAL = items.length; // 29
+
+  // ---- 日付軸：6/15 → 6/30 ----
+  var start = new Date(2026,5,15), end = new Date(2026,5,30);
+  var labels=[], dates=[];
+  for(var d=new Date(start); d<=end; d.setDate(d.getDate()+1)){
+    var dd=new Date(d); dates.push(dd);
+    labels.push((dd.getMonth()+1)+'/'+dd.getDate());
+  }
+  var N = labels.length-1; // 区間数(=15)
+
+  // ---- 目標線（理想）：6/15 で TOTAL → 6/30 で 0 ----
+  var ideal = labels.map(function(_,i){ return +(TOTAL*(N-i)/N).toFixed(2); });
+
+  // ---- 実績：日付ごとの残工種数（消化=done/skip）----
+  function ymd(dt){return dt.getFullYear()+'-'+String(dt.getMonth()+1).padStart(2,'0')+'-'+String(dt.getDate()).padStart(2,'0');}
+  var today = '2026-06-15';
+  var actual = dates.map(function(dt){
+    var key=ymd(dt);
+    if(key>today) return null; // 未来は未記入
+    var resolved = items.filter(function(it){
+      return (it.status==='done'||it.status==='skip') && it.date && it.date<=key;
+    }).length;
+    return TOTAL - resolved;
+  });
+
+  var doneCnt = items.filter(function(it){return it.status==='done';}).length;
+  var skipCnt = items.filter(function(it){return it.status==='skip';}).length;
+  var remain = TOTAL - doneCnt - skipCnt;
+
+  // ---- 消化予測線（実績ペースの外挿）----
+  //   実績ペース = これまでの消化数 / 経過日数。今日の残数から、そのペースで
+  //   0 になるまで右肩下がりに延ばす。今日より前は null（実績線と重ねない）。
+  var todayIdx = 0;
+  for(var ti=0; ti<dates.length; ti++){ if(ymd(dates[ti])===today){ todayIdx=ti; break; } }
+  var resolved0 = doneCnt + skipCnt;
+  var elapsed = todayIdx + 1;            // 着手初日を1日と数える
+  var rate = elapsed>0 ? resolved0/elapsed : 0;   // 1日あたり消化数
+  var forecast = labels.map(function(_,i){
+    if(i < todayIdx) return null;
+    if(rate <= 0) return (i===todayIdx ? remain : null);
+    return Math.max(0, +(remain - rate*(i - todayIdx)).toFixed(2));
+  });
+  // 予測で 0 に到達する日付
+  var finishLabel = '—';
+  if(rate > 0){
+    var dleft = remain / rate;
+    var fd = new Date(2026,5,15); fd.setDate(fd.getDate()+todayIdx+Math.ceil(dleft));
+    finishLabel = (fd.getMonth()+1)+'/'+fd.getDate();
+  }
+  document.getElementById('bd-stats').innerHTML =
+    '合格 <b style="color:#16a34a;">'+doneCnt+'</b> ／ スキップ <b style="color:#9333ea;">'+skipCnt+'</b> ／ 残 <b style="color:#2563eb;">'+remain+'</b> ／ 全 '+TOTAL+'工種<br>'+
+    '<span style="color:#6b7280;">残り日数 '+(N - (function(){var t=new Date(2026,5,15);return Math.round((t-start)/864e5);})())+'日（6/30まで）／ 実績ペース予測完了: <b style="color:#f59e0b;">'+finishLabel+'</b></span>';
+
+  // ---- グリッド（工種チップ）----
+  var colors={done:'#dcfce7',skip:'#f3e8ff',pending:'#f3f4f6'};
+  var bcol={done:'#16a34a',skip:'#9333ea',pending:'#d1d5db'};
+  var grid=document.getElementById('bd-grid');
+  items.forEach(function(it){
+    var el=document.createElement('div');
+    el.style.cssText='background:'+colors[it.status]+';border:1px solid '+bcol[it.status]+';border-radius:6px;padding:3px 6px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;';
+    el.title='#'+it.no+' '+it.name+' ('+it.status+')';
+    el.innerHTML='<b>#'+it.no+'</b> '+it.name;
+    grid.appendChild(el);
+  });
+
+  new Chart(document.getElementById('bdChart').getContext('2d'),{
+    type:'line',
+    data:{labels:labels,datasets:[
+      {label:'目標線（理想）',data:ideal,borderColor:'#9ca3af',borderDash:[6,5],borderWidth:2,pointRadius:0,tension:0,fill:false},
+      {label:'消化予測（実績ペース）',data:forecast,borderColor:'#f59e0b',borderDash:[3,3],borderWidth:2,pointRadius:0,tension:0,fill:false},
+      {label:'実績（残工種数）',data:actual,borderColor:'#2563eb',backgroundColor:'rgba(37,99,235,.08)',borderWidth:3,pointRadius:4,pointBackgroundColor:'#2563eb',spanGaps:false,tension:0,fill:true}
+    ]},
+    options:{
+      responsive:true,maintainAspectRatio:true,
+      plugins:{legend:{display:false},tooltip:{callbacks:{label:function(c){return c.dataset.label+': '+(c.parsed.y==null?'-':c.parsed.y+'工種');}}}},
+      scales:{
+        y:{title:{display:true,text:'残工種数'},beginAtZero:true,max:TOTAL,ticks:{stepSize:5}},
+        x:{title:{display:true,text:'日付（2026年6月）'},ticks:{maxRotation:0,autoSkip:true}}
+      }
+    }
+  });
+})();
+</script>

@@ -1,0 +1,12 @@
+軸ID,軸名,種別,SitsumonNo,列ラベル,変更理由,備考,強制行ID
+AX-001,代価表の選択,auto,2,代価表の選択(固定),自動選択(AutoSelectJoken),SitsumonKind=19,
+AX-002,地方整備局等区分,fix,45,地方整備局等区分,,SitsumonKind=19,
+AX-003,往復片道区分選択,auto,4,往復片道区分選択(固定),自動選択(AutoSelectJoken),SitsumonKind=19,
+AX-004,片道運搬距離,fix,5,片道運搬距離,,SitsumonKind=17,
+AX-005,製品長区分,fix,6,製品長区分,,SitsumonKind=19,
+AX-006,割増率の計上方法(標準:選択),auto,15,割増率の計上方法(標準:選択)(固定),"デフォルト実行 (SitsumonExecuteKind=1, SekisanEnv連動なし)",SitsumonKind=19,
+AX-007,冬期割増計上区分,fix,17,冬期割増計上区分,,SitsumonKind=19,
+AX-008,深夜・早朝割増計上区分,fix,19,深夜・早朝割増計上区分,,SitsumonKind=19,
+AX-009,その他の諸料金の有無,fix,8,その他の諸料金の有無,,SitsumonKind=19,
+AX-010,積込・取卸費用計上区分,vary,11,積込・取卸費用計上区分,レベル変数=3(必ず実行),SitsumonKind=19,
+AX-011,地方(県名)区分,vary,41,地方(県名)区分,選択肢テキスト変更,SitsumonKind=19,
