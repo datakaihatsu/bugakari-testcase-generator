@@ -616,11 +616,10 @@ class TestPlanGenerator:
             if forced:
                 kind = 'fix'
                 reason = '絞り込みで強制(vary到達経路)'
-            elif self._level_value_is(s, 3):
-                # レベル変数=3 (Execute/必ず実行) はユーザが選ぶ質問 → vary
-                #   (仕様§1.5。src=='auto' でも auto に落とさない。例 12/15/17 クレーン賃料補正・子代価)
-                kind = 'vary'
-                reason = 'レベル変数=3(必ず実行)'
+            # レベル変数=3(必ず実行)＝ユーザ入力で条件は開くが、**差分に無関係なら vary しない**
+            #   (差分駆動の原則。#29 FB 2026-06-15)。変更が無い質問を全パターン選択させるのは過剰。
+            #   代表1件で列に残す(下の src=='auto'→auto 等に委ねる)。差分対象のレベル3質問は
+            #   上流 vary_diff で既に vary 済みのためこのループには来ない。
             elif src == 'auto' and exec_kind == 2 and not s.get('LevelVarName'):
                 # 自動選択+ユーザー実行 → 通常はスキップ。ただしレベル変数を持つ質問は
                 # レベル最終値≠1なら「開く」(ここに到達した時点で≠1) → fix列として表示する。

@@ -43,8 +43,8 @@
     {no:25,name:'現場打ち水路(本体)',status:'done',date:'2026-06-15'},
     {no:26,name:'目地工',status:'done',date:'2026-06-15'},
     {no:27,name:'横組ｺﾝｸﾘｰﾄ工',status:'done',date:'2026-06-15'},
-    {no:28,name:'PC板仮置工',status:'pending'},
-    {no:29,name:'PC板敷設工',status:'pending'},
+    {no:28,name:'PC板仮置工',status:'done',date:'2026-06-17'},
+    {no:29,name:'PC板敷設工',status:'done',date:'2026-06-17'},
     {no:30,name:'型枠工(覆工)',status:'pending'},
     {no:31,name:'防音扉設置撤去',status:'pending'},
     {no:32,name:'小口径管布設',status:'pending'},
@@ -83,7 +83,7 @@
 
   // ---- 実績：日付ごとの残工種数（消化=done/skip）----
   function ymd(dt){return dt.getFullYear()+'-'+String(dt.getMonth()+1).padStart(2,'0')+'-'+String(dt.getDate()).padStart(2,'0');}
-  var today = '2026-06-16';
+  var today = '2026-06-17';
   var actual = dates.map(function(dt){
     var key=ymd(dt);
     if(key>today) return null; // 未来は未記入

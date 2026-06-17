@@ -1,3 +1,3 @@
 軸ID,軸名,種別,SitsumonNo,列ラベル,変更理由,備考,強制行ID
 AX-001,(クレーン)賃料長期割引の適用,fix,2,(クレーン)賃料長期割引の適用,,SitsumonKind=19,
-AX-002,クレーン賃料補正,vary,6,クレーン賃料補正,レベル変数=3(必ず実行),SitsumonKind=19,
+AX-002,クレーン賃料補正,auto,6,クレーン賃料補正(固定),自動選択(AutoSelectJoken),SitsumonKind=19,

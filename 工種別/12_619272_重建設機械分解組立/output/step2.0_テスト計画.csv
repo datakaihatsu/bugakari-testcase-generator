@@ -2,5 +2,5 @@
 AX-001,作業区分,fix,42,作業区分,,SitsumonKind=19,
 AX-002,機械質量区分,vary,9,機械質量区分,選択肢テキスト変更,SitsumonKind=19,
 AX-003,(ラフテレーンクレーン)賃料長期割引の適用,fix,51,(ラフテレーンクレーン)賃料長期割引の適用,,SitsumonKind=19,
-AX-004,クレーン賃料補正,vary,13,クレーン賃料補正,レベル変数=3(必ず実行),SitsumonKind=19,
+AX-004,クレーン賃料補正,auto,13,クレーン賃料補正(固定),自動選択(AutoSelectJoken),SitsumonKind=19,
 AX-005,機械区分,vary,72,機械区分,選択肢テキスト変更,SitsumonKind=19,

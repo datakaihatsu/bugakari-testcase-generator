@@ -627,9 +627,12 @@ class ColumnTCGenerator:
             v = cd2var.get(l.get('SuryoRitsuLinkKeisanItemCD'))
             if v:
                 any_link = True
-            if l.get('Column') is None:
-                continue
             if not v:
+                continue
+            # 数量率リンク(SuryoRitsuLink)と代価(DaikaItemCD)を持つ行は代価表に計上される
+            #   出力行 → 期待値対象。Column の有無では除外しない
+            #   (#28: D1R〜D3R は Column=None でも計上される。数量@計算で S1〜S3 が出る)。
+            if l.get('DaikaItemCD') is None:
                 continue
             for sv in s_in(v, set()):
                 if sv not in ordered:
@@ -1366,7 +1369,9 @@ class ColumnTCGenerator:
                 if _cd_sn not in tc_visited:
                     continue
                 checks.append(_cd_text)
-            row_data.append('\n'.join(checks))
+            # FB②: 確認観点が無い(条件変更なし)TCは「選択肢が商品と変わっていないこと」を出す
+            row_data.append('\n'.join(checks) if checks
+                            else '・選択肢が商品(現行版)と変わっていないこと')
             # 規格名計上に影響する検知が無い TC は「-」(確認不要の明示。#13/#14 FB)
             row_data.append('\n'.join(kikaku_checks) or '-')
             # J4: 重複TC除去 (vary 軸がこの TC で到達しない場合、選択違いでも
