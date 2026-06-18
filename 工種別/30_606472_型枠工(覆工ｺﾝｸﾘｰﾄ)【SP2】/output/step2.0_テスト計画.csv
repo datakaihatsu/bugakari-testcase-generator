@@ -1,0 +1,5 @@
+軸ID,軸名,種別,SitsumonNo,列ラベル,変更理由,備考,強制行ID
+AX-001,内空形状,vary,3,内空形状,選択肢テキスト変更,SitsumonKind=19,
+AX-002,スライドセントルの規格,fix,66,スライドセントルの規格,,SitsumonKind=19,
+AX-003,内空断面の上半周長,fix,65,内空断面の上半周長,,SitsumonKind=17,
+AX-004,スライドセントル損料対象長,fix,61,スライドセントル損料対象長,,SitsumonKind=17,

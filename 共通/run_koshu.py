@@ -70,7 +70,8 @@ def run_folder(folder):
     os.makedirs(out_dir, exist_ok=True)
     if len(js) >= 2:
         old, new = js[0], js[-1]
-        cmds = [[sys.executable, os.path.join(ROOT, '共通/pipeline.py'), old, new, out_dir]]
+        cmds = [[sys.executable, os.path.join(ROOT, '共通/pipeline.py'), old, new, out_dir,
+                 '--external-scenarios']]
         mode = f'差分型 (旧={os.path.basename(old)} / 新={os.path.basename(new)})'
     else:
         new = js[0]

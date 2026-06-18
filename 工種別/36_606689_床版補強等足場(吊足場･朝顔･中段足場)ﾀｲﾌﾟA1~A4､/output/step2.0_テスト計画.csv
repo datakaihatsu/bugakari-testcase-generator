@@ -1,0 +1,10 @@
+軸ID,軸名,種別,SitsumonNo,列ラベル,変更理由,備考,強制行ID
+AX-001,代価表の選択,fix,1,代価表の選択,,SitsumonKind=19,
+AX-002,足場架設の総月数,fix,2,足場架設の総月数,,SitsumonKind=17,
+AX-003,損料及び歩掛係数,fix,3,損料及び歩掛係数,,SitsumonKind=19,
+AX-004,環境による補正,fix,4,環境による補正,,SitsumonKind=19,
+AX-005,"足場面積の算出方法(A1~A4,B)",fix,6,"足場面積の算出方法(A1~A4,B)",,SitsumonKind=19,
+AX-006,全幅員(地覆外縁間距離),fix,8,全幅員(地覆外縁間距離),,SitsumonKind=17,
+AX-007,橋長または必要長,fix,9,橋長または必要長,,SitsumonKind=17,
+AX-008,"極小面積補正(A1~A4,B)",fix,10,"極小面積補正(A1~A4,B)",,SitsumonKind=19,
+AX-009,代価表行計上方法,auto,19,代価表行計上方法(固定),"デフォルト実行 (SitsumonExecuteKind=1, SekisanEnv連動なし)",SitsumonKind=19,

@@ -1,16 +1,8 @@
 """
 歩掛JSON テストケース生成パイプライン (絞り込みアプローチ)
 
-【方式】
-- 差分の SitsumonNo を直接活用
-- 到達経路を forward 探索 (PoC で 3工種実証済み)
-- vary 候補に到達するための前段 fix 軸を自動推論
-
-【旧版】
-旧パイプライン (v1: 名称マッチ/baseline 経路) は 共通/_backup_v1/ に保管。
-
 【使い方】
-  python pipeline.py <old_json> <new_json> <output_dir>
+  python pipeline.py <old_json> <new_json> <output_dir> [--external-scenarios]
 """
 
 import sys
@@ -28,7 +20,7 @@ from generate_proposals import run as run_step2
 from generate_csv import run as run_step3
 
 
-def run_pipeline(old_json, new_json, output_dir):
+def run_pipeline(old_json, new_json, output_dir, external_scenarios=False):
     os.makedirs(output_dir, exist_ok=True)
 
     print('=' * 50)
@@ -59,9 +51,27 @@ def run_pipeline(old_json, new_json, output_dir):
     step3_out = os.path.join(output_dir, 'step3.0_テストケース.csv')
     run_step3(step2_out, new_json, step3_out, old_json)
 
+    # --- 任意: 外部/計設定変数シナリオの追加生成 (既定OFF・本体不変) ---
+    #   ONのときだけ、差分が外部変数の非既定分岐の奥にある工種で
+    #   step3.0_テストケース_<シナリオ>.csv を別ファイルで追加出力する(#35 大阪市等)。
+    if external_scenarios:
+        try:
+            from external_scenarios import generate as gen_ext
+            print()
+            print('=' * 50)
+            print('④ 外部/計設定変数シナリオ (任意・追加生成)')
+            print('=' * 50)
+            made = gen_ext(old_json, new_json, output_dir, run_step2, run_step3)
+            if not made:
+                print('  (該当シナリオなし)')
+        except Exception as e:
+            print(f'  [外部シナリオ生成スキップ] {e}')
+
 
 if __name__ == '__main__':
-    if len(sys.argv) < 4:
-        print('Usage: python pipeline.py <old_json> <new_json> <output_dir>')
+    args = [a for a in sys.argv[1:] if not a.startswith('--')]
+    ext = '--external-scenarios' in sys.argv
+    if len(args) < 3:
+        print('Usage: python pipeline.py <old_json> <new_json> <output_dir> [--external-scenarios]')
         sys.exit(1)
-    run_pipeline(sys.argv[1], sys.argv[2], sys.argv[3])
+    run_pipeline(args[0], args[1], args[2], external_scenarios=ext)

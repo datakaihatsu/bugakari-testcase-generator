@@ -23,13 +23,14 @@
       <div style="display:flex;align-items:center;gap:6px;margin-bottom:4px;"><span style="width:22px;height:0;border-top:2px dashed #f59e0b;display:inline-block;"></span>消化予測（実績ペースの外挿）</div>
       <div style="display:flex;align-items:center;gap:6px;margin-bottom:8px;"><span style="width:22px;height:0;border-top:3px solid #2563eb;display:inline-block;"></span>実績（残工種数）</div>
       <div>・「消化」＝合格 or スキップ。</div>
+      <div>・<b>6/26 は東京出張で非稼働</b>（目標線・予測線は稼働日で按分。6/26は水平）。</div>
       <div>・スキップ候補：#43/#44/#45/#54（潜水士船・機械損料系）。</div>
       <div>・方針空（添付転記要）：#34/#36/#37/#39/#43/#44/#45/#54。</div>
       <div>・外部依存：#35（#602761修正後・SS参照）。</div>
       <div style="margin-top:6px;">・#51〜#57 はバッファ（50工種到達のための予備）。</div>
     </div>
   </div>
-  <div style="margin-top:10px;font-size:11px;color:#9ca3af;">最終更新：2026-06-16（本日0工種消化・進捗なし）</div>
+  <div style="margin-top:10px;font-size:11px;color:#9ca3af;">最終更新：2026-06-18（#24・#30・#34・#35 合格／#31・#32・#33 スキップ。回帰31工種一致。B-22 外部/計設定変数シナリオ分割生成を実装＝#35大阪市msk=4・#34 O~atk=4・#24被災地O~pre=17等を別ファイル自動生成。6/26は東京出張で非稼働＝目標/予測線を稼働日按分）</div>
 </div>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
@@ -39,19 +40,19 @@
   var items = [
     {no:22,name:'路上路盤再生工',status:'done',date:'2026-06-15'},
     {no:23,name:'輸送費(仮設材)',status:'done',date:'2026-06-15'},
-    {no:24,name:'表層(歩道部)被災地',status:'skip',date:'2026-06-15'},
+    {no:24,name:'表層(歩道部)被災地',status:'done',date:'2026-06-18'},
     {no:25,name:'現場打ち水路(本体)',status:'done',date:'2026-06-15'},
     {no:26,name:'目地工',status:'done',date:'2026-06-15'},
     {no:27,name:'横組ｺﾝｸﾘｰﾄ工',status:'done',date:'2026-06-15'},
     {no:28,name:'PC板仮置工',status:'done',date:'2026-06-17'},
     {no:29,name:'PC板敷設工',status:'done',date:'2026-06-17'},
-    {no:30,name:'型枠工(覆工)',status:'pending'},
-    {no:31,name:'防音扉設置撤去',status:'pending'},
-    {no:32,name:'小口径管布設',status:'pending'},
-    {no:33,name:'ﾎﾟﾘｴﾁﾚﾝ管据付',status:'pending'},
-    {no:34,name:'反転引込工',status:'pending'},
-    {no:35,name:'ﾓﾙﾀﾙ上塗工',status:'pending'},
-    {no:36,name:'床版補強等足場',status:'pending'},
+    {no:30,name:'型枠工(覆工)',status:'done',date:'2026-06-18'},
+    {no:31,name:'防音扉設置撤去',status:'skip',date:'2026-06-18'},
+    {no:32,name:'小口径管布設',status:'skip',date:'2026-06-18'},
+    {no:33,name:'ﾎﾟﾘｴﾁﾚﾝ管据付',status:'skip',date:'2026-06-18'},
+    {no:34,name:'反転引込工',status:'done',date:'2026-06-18'},
+    {no:35,name:'ﾓﾙﾀﾙ上塗工',status:'done',date:'2026-06-18'},
+    {no:36,name:'床版補強等足場',status:'done',date:'2026-06-18'},
     {no:37,name:'ｼｰﾘﾝｸﾞ',status:'pending'},
     {no:38,name:'FEP敷設',status:'pending'},
     {no:39,name:'工場塗装',status:'pending'},
@@ -78,12 +79,19 @@
   }
   var N = labels.length-1; // 区間数(=15)
 
-  // ---- 目標線（理想）：6/15 で TOTAL → 6/30 で 0 ----
-  var ideal = labels.map(function(_,i){ return +(TOTAL*(N-i)/N).toFixed(2); });
+  // ---- 非稼働日（出張等）: 目標線・予測線の按分から除外（実績線はそのまま） ----
+  function ymd(dt){return dt.getFullYear()+'-'+String(dt.getMonth()+1).padStart(2,'0')+'-'+String(dt.getDate()).padStart(2,'0');}
+  var holidays = {'2026-06-26':'東京出張'};
+  function isHol(dt){return !!holidays[ymd(dt)];}
+  // 各日付までの累積「稼働日」数（6/15を基点0、以降は稼働日のみ+1。非稼働日は据え置き）
+  var cumWork = dates.map(function(_,i){ var c=0; for(var k=1;k<=i;k++){ if(!isHol(dates[k])) c++; } return c; });
+  var totalWork = cumWork[cumWork.length-1]; // 6/30までの稼働日数（6/26を除く）
+
+  // ---- 目標線（理想）：稼働日のみで TOTAL→0 按分。非稼働日(6/26)は前日と同値で水平 ----
+  var ideal = dates.map(function(_,i){ return +(TOTAL*(1 - cumWork[i]/totalWork)).toFixed(2); });
 
   // ---- 実績：日付ごとの残工種数（消化=done/skip）----
-  function ymd(dt){return dt.getFullYear()+'-'+String(dt.getMonth()+1).padStart(2,'0')+'-'+String(dt.getDate()).padStart(2,'0');}
-  var today = '2026-06-17';
+  var today = '2026-06-18';
   var actual = dates.map(function(dt){
     var key=ymd(dt);
     if(key>today) return null; // 未来は未記入
@@ -103,19 +111,20 @@
   var todayIdx = 0;
   for(var ti=0; ti<dates.length; ti++){ if(ymd(dates[ti])===today){ todayIdx=ti; break; } }
   var resolved0 = doneCnt + skipCnt;
-  var elapsed = todayIdx + 1;            // 着手初日を1日と数える
-  var rate = elapsed>0 ? resolved0/elapsed : 0;   // 1日あたり消化数
-  var forecast = labels.map(function(_,i){
+  var elapsedWork = cumWork[todayIdx] + 1;        // 着手初日(6/15)を1稼働日と数える
+  var rate = elapsedWork>0 ? resolved0/elapsedWork : 0;   // 1稼働日あたり消化数
+  var forecast = dates.map(function(_,i){
     if(i < todayIdx) return null;
     if(rate <= 0) return (i===todayIdx ? remain : null);
-    return Math.max(0, +(remain - rate*(i - todayIdx)).toFixed(2));
+    var workFromToday = cumWork[i] - cumWork[todayIdx]; // todayからの稼働日数(6/26は加算しない)
+    return Math.max(0, +(remain - rate*workFromToday).toFixed(2));
   });
-  // 予測で 0 に到達する日付
+  // 予測で 0 に到達する日付（非稼働日6/26はスキップして数える）
   var finishLabel = '—';
   if(rate > 0){
-    var dleft = remain / rate;
-    var fd = new Date(2026,5,15); fd.setDate(fd.getDate()+todayIdx+Math.ceil(dleft));
-    finishLabel = (fd.getMonth()+1)+'/'+fd.getDate();
+    var need = Math.ceil(remain / rate), cntw = 0, fi = todayIdx;
+    while(fi < dates.length-1 && cntw < need){ fi++; if(!isHol(dates[fi])) cntw++; }
+    finishLabel = labels[fi];
   }
   document.getElementById('bd-stats').innerHTML =
     '合格 <b style="color:#16a34a;">'+doneCnt+'</b> ／ スキップ <b style="color:#9333ea;">'+skipCnt+'</b> ／ 残 <b style="color:#2563eb;">'+remain+'</b> ／ 全 '+TOTAL+'工種<br>'+

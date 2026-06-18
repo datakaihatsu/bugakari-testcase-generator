@@ -257,6 +257,20 @@ class FlowWalker:
     # Row 選択ロジック
     # ------------------------------------------------------------------
 
+    def _resolve_s019(self, sitsumon_no):
+        """Sitsumon019 を取得。自身に無ければ ShortCutSitsumonNo を解決して参照する。
+        戻り値: (実効SitsumonNo, s019 or None)
+        ShortCut 質問(例: 30 型枠工 No66 スライドセントルの規格 → No1)は定義を
+        参照先と共有するため、行選択・変数伝搬・分岐判定はすべて参照先の s019 で行う。
+        """
+        s019 = self.s019.get(sitsumon_no)
+        if s019 is not None:
+            return sitsumon_no, s019
+        sc = self.bj.sitsumon_by_no.get(sitsumon_no, {}).get('ShortCutSitsumonNo')
+        if sc:
+            return sc, self.s019.get(sc)
+        return sitsumon_no, None
+
     def _choose_row(self, sitsumon_no):
         """選択行を決定。優先: vary > auto > default > 先頭
         副作用: self.row_sources[sitsumon_no] に選択経緯を記録 ('vary'/'auto'/'default'/'first')
@@ -281,7 +295,7 @@ class FlowWalker:
             self.row_sources[sitsumon_no] = 'vary'
             return self.vary_selections[sitsumon_no]
 
-        sit019 = self.s019.get(sitsumon_no)
+        eff_no, sit019 = self._resolve_s019(sitsumon_no)
         if sit019 is None:
             # Sitsumon017 等は Sitsumon019 を持たない
             return None
@@ -310,7 +324,7 @@ class FlowWalker:
 
         # 3. デフォルト行 (SitTab.DefaultRowID)
         for tab in self.data.get('SitTab', []):
-            if tab.get('SitsumonNo') == sitsumon_no:
+            if tab.get('SitsumonNo') == eff_no:
                 d = tab.get('DefaultRowID')
                 if d:
                     self.row_sources[sitsumon_no] = 'default'
@@ -352,7 +366,7 @@ class FlowWalker:
     # ------------------------------------------------------------------
 
     def _apply_row_vars(self, sitsumon_no, row_id):
-        sit019 = self.s019.get(sitsumon_no)
+        eff_no, sit019 = self._resolve_s019(sitsumon_no)
         if sit019 is None:
             return
         var_cols = [c for c in sit019.get('SitCols', []) if c.get('VarName')]
@@ -362,7 +376,7 @@ class FlowWalker:
         #   決め、そのタブのセル値を伝搬する (例: 04 No:3 日当り施工量 →
         #   被災地補正なし=630 / あり=567)。J30 等のタブ判定変数は、フロー上で
         #   先行する質問(被災地 No:1)が既に設定済み。
-        active_tab = self.bj.active_tab_no(sitsumon_no, self.hyo)
+        active_tab = self.bj.active_tab_no(eff_no, self.hyo)
         for vc in var_cols:
             val = self.bj.cell_value_for_tab(sit019, row_id, vc['ColID'], active_tab)
             if val is None or val == '':
@@ -374,7 +388,7 @@ class FlowWalker:
 
     # ------------------------------------------------------------------
     # Bunki の遷移先決定
-    # ------------------------------------------------------------------
+    # ------------------------------------------------------
 
     def _bunki_next_box(self, box, sitsumon_no, chosen_row):
         """選択行に対応する CallBox を返す"""
@@ -384,7 +398,7 @@ class FlowWalker:
         if chosen_row is None:
             return cb[0]
 
-        sit019 = self.s019.get(sitsumon_no)
+        eff_no, sit019 = self._resolve_s019(sitsumon_no)
         if sit019 is None:
             return cb[0]
 

@@ -1,0 +1,9 @@
+軸ID,軸名,種別,SitsumonNo,列ラベル,変更理由,備考,強制行ID
+AX-001,モルタル厚さ入力単位の表示切替,auto,14,モルタル厚さ入力単位の表示切替(固定),"デフォルト実行 (SitsumonExecuteKind=1, SekisanEnv連動なし)",SitsumonKind=19,
+AX-002,上塗モルタル厚(1~3cm),fix,1,上塗モルタル厚(1~3cm),,SitsumonKind=17,
+AX-003,モルタル施工方法,fix,2,モルタル施工方法,,SitsumonKind=19,
+AX-004,セメント種類,fix,13,セメント種類,,SitsumonKind=19,
+AX-005,子代価の積算方式決定,auto,9,子代価の積算方式決定(固定),自動選択(AutoSelectJoken),SitsumonKind=19,
+AX-006,セメント種類,vary,27,セメント種類,新規追加質問,SitsumonKind=19,
+AX-007,モルタル配合比,vary,28,モルタル配合比,新規追加質問,SitsumonKind=19,
+AX-008,セメント種類,vary,29,セメント種類,新規追加質問,SitsumonKind=19,
