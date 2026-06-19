@@ -1,0 +1,4 @@
+軸ID,軸名,種別,SitsumonNo,列ラベル,変更理由,備考,強制行ID
+AX-001,運搬物種別,fix,8,運搬物種別,,SitsumonKind=19,
+AX-002,不整地運搬車規格選択,fix,7,不整地運搬車規格選択,,SitsumonKind=19,
+AX-003,片道平均運搬距離,fix,3,片道平均運搬距離,,SitsumonKind=17,

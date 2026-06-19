@@ -1,0 +1,5 @@
+軸ID,軸名,種別,SitsumonNo,列ラベル,変更理由,備考,強制行ID
+AX-001,工事区分,fix,6,工事区分,,SitsumonKind=19,
+AX-002,週休2日補正の選択,auto,10,週休2日補正の選択(固定),自動選択(AutoSelectJoken),SitsumonKind=19,
+AX-003,市場単価補正区分(特別措置の試行),auto,7,市場単価補正区分(特別措置の試行)(固定),"デフォルト実行 (SitsumonExecuteKind=1, SekisanEnv連動なし)",SitsumonKind=19,
+AX-004,シーリング,fix,3,シーリング,,SitsumonKind=19,

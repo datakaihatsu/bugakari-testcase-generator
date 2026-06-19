@@ -117,11 +117,18 @@ def _indent_level(raw_line):
 
 def load_intent(path):
     """修正方針.txt を読み、主項目リストを返す"""
-    try:
-        with open(path, encoding='utf-8-sig') as f:
-            text = f.read()
-    except UnicodeDecodeError:
-        with open(path, encoding='cp932') as f:
+    text = None
+    for enc in ('utf-8-sig', 'cp932'):
+        try:
+            with open(path, encoding=enc) as f:
+                text = f.read()
+            break
+        except UnicodeDecodeError:
+            continue
+    if text is None:
+        # 末尾の多バイト文字が途中で切れている等の壊れた方針でも止めない
+        #   (例: #40 修正方針.txt が UTF-8 でEOF直前が不完全)。壊れた箇所は置換。
+        with open(path, encoding='utf-8', errors='replace') as f:
             text = f.read()
 
     items = []

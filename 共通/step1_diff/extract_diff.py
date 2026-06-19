@@ -73,10 +73,16 @@ class DiffExtractor:
         rows = []
 
         def defmap(bj):
+            # SitsumonNo → DefaultRowID。基本タブ(TabNo=None)を優先、無ければ任意タブの
+            #   非Null値を採る(B-23: TabNo付きタブのみに既定行が付くケース=#37 にも対応)。
             m = {}
             for t in bj.data.get('SitTab', []):
-                if t.get('TabNo') is None and t.get('DefaultRowID') is not None:
-                    m[t.get('SitsumonNo')] = t.get('DefaultRowID')
+                no = t.get('SitsumonNo')
+                drid = t.get('DefaultRowID')
+                if drid is None:
+                    continue
+                if no not in m or t.get('TabNo') is None:
+                    m[no] = drid
             return m
 
         def row_text(bj, no, row_id):
@@ -91,12 +97,19 @@ class DiffExtractor:
         om, nm = defmap(self.old), defmap(self.new)
         sit_by_no = {x['SitsumonNo']: x for x in self.new.data.get('SitsumonItem', [])}
         for no in sorted(nm):
+            name = sit_by_no.get(no, {}).get('Mesho', f'質問No:{no}')
             if no in om and om[no] != nm[no]:
-                name = sit_by_no.get(no, {}).get('Mesho', f'質問No:{no}')
                 rows.append([
                     '質問設定', '変更', f'質問No:{no}', name,
                     row_text(self.old, no, om[no]), row_text(self.new, no, nm[no]),
                     '初期値変更',
+                ])
+            elif no not in om:
+                # 既定行の新規設定 (None→行) (B-23: #37 等の DefaultRowID 追加)
+                rows.append([
+                    '質問設定', '変更', f'質問No:{no}', name,
+                    '(既定行なし)', row_text(self.new, no, nm[no]),
+                    '初期値設定(既定行を追加)',
                 ])
         return rows
 
@@ -273,6 +286,12 @@ class DiffExtractor:
                 changes = []
                 if old_item.get('Mesho') != item.get('Mesho'):
                     changes.append('表示名変更')
+                # 実行種別(SitsumonExecuteKind)変更 (B-23): 必ず実行↔デフォルト選択 等の挙動変更。
+                #   §2.3 ExecKind: 0=なし/1=デフォルト選択/2=必ず実行/4=計設定
+                _EK = {0: 'なし', 1: 'デフォルト選択', 2: '必ず実行', 4: '計設定'}
+                _oek, _nek = old_item.get('SitsumonExecuteKind'), item.get('SitsumonExecuteKind')
+                if _oek != _nek:
+                    changes.append(f'実行種別変更({_EK.get(_oek, _oek)}→{_EK.get(_nek, _nek)})')
                 if old_item.get('SitsumonVersion') != item.get('SitsumonVersion'):
                     changes.append('バージョン更新')
                 if changes:

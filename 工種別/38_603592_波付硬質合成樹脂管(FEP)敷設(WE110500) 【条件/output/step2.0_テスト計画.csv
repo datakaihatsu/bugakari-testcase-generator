@@ -1,0 +1,8 @@
+軸ID,軸名,種別,SitsumonNo,列ラベル,変更理由,備考,強制行ID
+AX-001,作業内容による補正,fix,1,作業内容による補正,,SitsumonKind=19,
+AX-002,作業種別,fix,2,作業種別,,SitsumonKind=19,
+AX-003,管規格,fix,5,管規格,,SitsumonKind=19,
+AX-004,1条・100m当りFEP管の数量,fix,6,1条・100m当りFEP管の数量,,SitsumonKind=17,
+AX-005,条数による補正(条),fix,17,条数による補正(条),,SitsumonKind=17,
+AX-006,資材計上区分,auto,4,資材計上区分(固定),自動選択(AutoSelectJoken),SitsumonKind=19,
+AX-007,付属品率計上(%),fix,7,付属品率計上(%),,SitsumonKind=17,

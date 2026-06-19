@@ -30,7 +30,7 @@
       <div style="margin-top:6px;">・#51〜#57 はバッファ（50工種到達のための予備）。</div>
     </div>
   </div>
-  <div style="margin-top:10px;font-size:11px;color:#9ca3af;">最終更新：2026-06-18（#24・#30・#34・#35 合格／#31・#32・#33 スキップ。回帰31工種一致。B-22 外部/計設定変数シナリオ分割生成を実装＝#35大阪市msk=4・#34 O~atk=4・#24被災地O~pre=17等を別ファイル自動生成。6/26は東京出張で非稼働＝目標/予測線を稼働日按分）</div>
+  <div style="margin-top:10px;font-size:11px;color:#9ca3af;">最終更新：2026-06-19（#24・#30・#34・#35・#36・#37・#38 合格／#31・#32・#33・#39 スキップ／#40 保留(週明け再開・B-24条件列の製品検証待ち)。回帰34工種一致。6/26は東京出張で非稼働＝目標/予測線を稼働日按分）</div>
 </div>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
@@ -53,9 +53,9 @@
     {no:34,name:'反転引込工',status:'done',date:'2026-06-18'},
     {no:35,name:'ﾓﾙﾀﾙ上塗工',status:'done',date:'2026-06-18'},
     {no:36,name:'床版補強等足場',status:'done',date:'2026-06-18'},
-    {no:37,name:'ｼｰﾘﾝｸﾞ',status:'pending'},
-    {no:38,name:'FEP敷設',status:'pending'},
-    {no:39,name:'工場塗装',status:'pending'},
+    {no:37,name:'ｼｰﾘﾝｸﾞ',status:'done',date:'2026-06-19'},
+    {no:38,name:'FEP敷設',status:'done',date:'2026-06-19'},
+    {no:39,name:'工場塗装',status:'skip',date:'2026-06-19'},
     {no:40,name:'小型不整地運搬車',status:'pending'},
     {no:41,name:'既製ｺﾝｸﾘｰﾄ杭打工',status:'pending'},
     {no:42,name:'解析等調査業務費',status:'pending'},
@@ -91,7 +91,7 @@
   var ideal = dates.map(function(_,i){ return +(TOTAL*(1 - cumWork[i]/totalWork)).toFixed(2); });
 
   // ---- 実績：日付ごとの残工種数（消化=done/skip）----
-  var today = '2026-06-18';
+  var today = '2026-06-19';
   var actual = dates.map(function(dt){
     var key=ymd(dt);
     if(key>today) return null; // 未来は未記入
