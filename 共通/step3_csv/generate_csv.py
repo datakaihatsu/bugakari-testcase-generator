@@ -1113,9 +1113,22 @@ class ColumnTCGenerator:
 
         # A: 列除外 (vary は到達確認後の vary_row_lists 基準)
         vary_sit_nos = {int(ax['SitsumonNo']) for ax, _ in vary_row_lists}
+        # ShortCut等価(#40 片道平均運搬距離): 同一質問の別フロー位置(ShortCut子)が到達して
+        #   いれば、canonical 軸も到達とみなす。軸=No3だが t経路では子No49が到達する等。
+        _sc_canon = {s['SitsumonNo']: s.get('ShortCutSitsumonNo')
+                     for s in self.new_json.data.get('SitsumonItem', [])
+                     if s.get('ShortCutSitsumonNo')}
+        _visited_eq = set(all_visited)
+        _canon_children = {}
+        for _v in list(all_visited):
+            _c = _sc_canon.get(_v)
+            if _c:
+                _visited_eq.add(_c)
+        for _ch, _cn in _sc_canon.items():
+            _canon_children.setdefault(_cn, []).append(_ch)
         axes_displayed = [
             ax for ax in axes_sorted
-            if int(ax['SitsumonNo']) in all_visited or int(ax['SitsumonNo']) in vary_sit_nos
+            if int(ax['SitsumonNo']) in _visited_eq or int(ax['SitsumonNo']) in vary_sit_nos
         ]
         axes_excluded = [ax for ax in axes_sorted if ax not in axes_displayed]
         if axes_excluded:
@@ -1225,9 +1238,17 @@ class ColumnTCGenerator:
                 if sit_no in tc_visited and sit_no not in _closed_set:
                     row_data.append(self._display_for_tab(row, hyo) if row else '')
                     continue
+                # ShortCut等価(#40 片道平均運搬距離): 自Sit(canonical)が未到達でも
+                #   ShortCut子(別フロー位置・同一質問)が到達していればその行で表示する。
+                _shown = None
+                for _ch in _canon_children.get(sit_no, []):
+                    if _ch in tc_visited and _ch not in _closed_set:
+                        # canonical(自Sit)の行で表示する。ShortCut子は同一質問で、
+                        #   Sitsumon017(「任意」)等の定義は canonical 側にあるため。
+                        _shown = (self._display_for_tab(row, hyo) if row else '')
+                        break
                 # Fix1: 自Sitが未到達でも同名の並行分岐質問(別Sit)が到達していれば
                 #   その代表行(既定行)を表示する。
-                _shown = None
                 for _sib in col_sibling_sits.get(ax['軸ID'], []):
                     if _sib in tc_visited and _sib not in _closed_set:
                         _sib_rows = self._get_axis_rows(_sib)

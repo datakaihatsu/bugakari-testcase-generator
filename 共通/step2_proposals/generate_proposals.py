@@ -356,6 +356,95 @@ class TestPlanGenerator:
             return None
 
     @staticmethod
+    def _joken_selects_spec(joken, value):
+        """確定仕様 BugakariKigouEnum(1=＜/2=≦/3=＝)で行条件を満たすか。
+        #40隙間判定専用の局所関数。既存 _joken_selects(誤対応)は変更しない。"""
+        if value is None:
+            return False
+        ok = True
+        nk, nv = joken.get('MinKigou'), joken.get('MinValue')
+        mk, mv = joken.get('MaxKigou'), joken.get('MaxValue')
+        if nv is not None:
+            if nk == 1: ok = ok and (nv < value)
+            elif nk == 2: ok = ok and (nv <= value)
+            elif nk == 3: ok = ok and (nv == value)
+        if mv is not None:
+            if mk == 1: ok = ok and (value < mv)
+            elif mk == 2: ok = ok and (value <= mv)
+            elif mk == 3: ok = ok and (value == mv)
+        return ok
+
+    def _depends_on_external(self, varname, _seen=None):
+        """駆動変数が(推移的に)外部/環境変数(O~接頭)に依存するか。"""
+        import re
+        if not varname:
+            return False
+        if _seen is None:
+            _seen = set()
+        if varname in _seen:
+            return False
+        _seen.add(varname)
+        if varname[:1] == 'O' and varname[1:2] in ('~', '‾'):
+            return True
+        k = self.new_json.keisan_by_varname.get(varname)
+        if k and k.get('Expression'):
+            for v in re.findall(r"[A-Za-z][A-Za-z0-9~‾_]*", k['Expression']):
+                if v != varname and self._depends_on_external(v, _seen):
+                    return True
+        return False
+
+    def _resolve_value_with(self, v, scope):
+        """指定スコープで変数 v を非strict評価して実値を返す(差分経路用)。"""
+        from bugakari_json import KeisanHyo
+        hyo = KeisanHyo(self.new_json.data.get('KeisanItem', []))
+        for vn, val in (scope or {}).items():
+            try:
+                hyo.set_input(vn, val)
+            except Exception:
+                pass
+        try:
+            return float(hyo.value(v))
+        except Exception:
+            return None
+
+    def _opens_on_forced_route(self, sn, scope):
+        """差分強制経路(scope)で質問 sn が『開く』か。
+        条件: 全選択可能行が AutoSelectJoken を持ち、各駆動変数が
+          (1) JSON内で確定(scope内 or 計算式/値あり)し (2) 外部(O~)でない、
+          かつ確定Kigouで『どの行も選ばれない(隙間)』。
+        判定不能(joken無し行/未解決/外部)は False=従来どおり隠す(安全側)。"""
+        s019 = self.new_json.sitsumon019_by_no.get(sn)
+        if not s019:
+            return False
+        sel = [r['RowID'] for r in s019.get('SitRows', [])
+               if r.get('Visible', True) and not r.get('IsFixed', False)]
+        if not sel:
+            return False
+        any_driver = False
+        for r in s019.get('SitTabRows', []):
+            if r.get('RowID') not in sel:
+                continue
+            j = r.get('AutoSelectJoken') or {}
+            v = j.get('VarName')
+            if not v:
+                return False  # joken無し行=単純ユーザ質問。本補完では扱わない
+            if self._depends_on_external(v):
+                return False  # 外部/環境変数 → 隠す側
+            # ★強制経路スコープに『直接』設定された変数のみ信用する。
+            #   計算式変数や未入力変数は、強制経路で未設定の入力に依存し既定0へ落ちて
+            #   見かけ上『隙間』になりうる(#23 基本運賃LK・冬期割増rsth等の誤検知)。
+            #   #40 FG1 は運搬物種別の選択が直接 set するためスコープに入る=本物。
+            if v not in scope:
+                return False
+            val = scope.get(v)
+            if val is None:
+                return False
+            any_driver = True
+            if self._joken_selects_spec(j, val):
+                return False  # どれかの行が選ばれる → 自動確定 → 隠す
+        return any_driver  # 全駆動が直接確定&どの行も選ばない → 隙間 → 開く
+
+    @staticmethod
     def _joken_selects(joken, value):
         """AutoSelectJoken の範囲条件を value が満たすか。Kigou: 1=Equal,2=Greater(< / >),3=<=。"""
         if value is None:
@@ -668,6 +757,39 @@ class TestPlanGenerator:
                 'reason': '絞り込みで強制(vary到達経路)',
                 'forced_row_id': str(probe_rid),
             })
+
+        # ---- #40対応: 差分強制経路で『開く』条件の限定補完 (2026-06-22) ----
+        #   baselineでは自動確定で隠れていた質問が、差分vary到達のため強制した経路では
+        #   駆動変数が範囲の隙間に落ちて開くことがある (#40 運搬物種別=セメントt→FG1=8)。
+        #   _opens_on_forced_route で「全駆動が確定&外部でない&確定Kigouでどの行も選ばない」
+        #   時だけ fix 列に補完。未解決/外部/行を選ぶ質問は従来どおり隠す(安全側)。
+        #   既存のbaseline分類・走査(flow_walker)は一切変更しない。
+        if path_fix:
+            _fr = FlowWalker(self.new_json, vary_selections=dict(path_fix))
+            _fr_res = _fr.walk()
+            try:
+                _fr_scope = dict(_fr.hyo._user_inputs)
+            except Exception:
+                _fr_scope = {}
+            _axis_now = {ax['sit'].get('SitsumonNo') for ax in result_axes}
+            _seenf = set()
+            for _sn in _fr_res.get('visited_sitsumons', []):
+                if _sn in _axis_now or _sn in _seenf:
+                    continue
+                _seenf.add(_sn)
+                _s2 = sit_by_no.get(_sn)
+                if not _s2 or _s2.get('SitsumonKind') not in (17, 19):
+                    continue
+                _m = _s2.get('Mesho') or ''
+                if '=' in _m and not any(ord(c) >= 128 for c in _m.split('=', 1)[0]):
+                    continue
+                if self._opens_on_forced_route(_sn, _fr_scope):
+                    result_axes.append({
+                        'sit': _s2,
+                        'kind': 'fix',
+                        'reason': '差分到達経路で開く条件(既定経路では非表示)',
+                        'forced_row_id': '',
+                    })
 
         # ShortCut重複排除: 参照先(ShortCut先)も同じく軸になっている場合、
         #   参照側(ShortCut元)は同一質問を別ルートに置いた重複なので除外し1列に統合する。

@@ -1,0 +1,11 @@
+軸ID,軸名,種別,SitsumonNo,列ラベル,変更理由,備考,強制行ID
+AX-001,条件選択,fix,5,条件選択,,SitsumonKind=19,
+AX-002,土質係数(α),auto,34,土質係数(α)(固定),"デフォルト実行 (SitsumonExecuteKind=1, SekisanEnv連動なし)",SitsumonKind=19,
+AX-003,条件選択,fix,6,条件選択,,SitsumonKind=19,
+AX-004,施工日数,fix,38,施工日数,,SitsumonKind=19,
+AX-005,資材計上区分,vary,7,資材計上区分,業務ルール: 資材計上区分の切替が代価表数量に影響,SitsumonKind=19,
+AX-006,継手の有無(材料費+施工費),fix,8,継手の有無(材料費+施工費),,SitsumonKind=19,
+AX-007,杭体内補強鉄筋計上区分,fix,27,杭体内補強鉄筋計上区分,絞り込みで強制(vary到達経路),SitsumonKind=19,4
+AX-008,(クローラクレーン)排ガス機械の選択,fix,25,(クローラクレーン)排ガス機械の選択,,SitsumonKind=19,
+AX-009,(超低騒音型バックホウ)排ガス機械の選択,fix,23,(超低騒音型バックホウ)排ガス機械の選択,,SitsumonKind=19,
+AX-010,10本当り杭体内補強鉄筋数量,vary,53,10本当り杭体内補強鉄筋数量,選択肢削除,SitsumonKind=17,
