@@ -1,0 +1,9 @@
+軸ID,軸名,種別,SitsumonNo,列ラベル,変更理由,備考,強制行ID
+AX-001,作業種類能力係数(本体工),auto,2,作業種類能力係数(本体工)(固定),"デフォルト実行 (SitsumonExecuteKind=1, SekisanEnv連動なし)",SitsumonKind=19,
+AX-002,ブロックの種類選択(本体工),fix,24,ブロックの種類選択(本体工),,SitsumonKind=19,
+AX-003,ブロック質量の適用方法,fix,33,ブロック質量の適用方法,,SitsumonKind=19,
+AX-004,ブロック質量の選択,fix,34,ブロック質量の選択,,SitsumonKind=19,
+AX-005,施工区分の選択,fix,5,施工区分の選択,,SitsumonKind=19,
+AX-006,ウインチ移動,fix,6,ウインチ移動,,SitsumonKind=19,
+AX-007,作業機械の変更,fix,7,作業機械の変更,,SitsumonKind=19,
+AX-008,労務編成,fix,19,労務編成,,SitsumonKind=19,

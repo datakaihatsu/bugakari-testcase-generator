@@ -1,0 +1,13 @@
+軸ID,軸名,種別,SitsumonNo,列ラベル,変更理由,備考,強制行ID
+AX-001,施工区分の選択,fix,1,施工区分の選択,,SitsumonKind=19,
+AX-002,条件選択,fix,29,条件選択,,SitsumonKind=19,
+AX-003,潜水士船1時間当り標準均し能力,auto,49,潜水士船1時間当り標準均し能力(固定),"デフォルト実行 (SitsumonExecuteKind=1, SekisanEnv連動なし)",SitsumonKind=19,
+AX-004,施工規模区分能力補正係数,fix,13,施工規模区分能力補正係数,,SitsumonKind=19,
+AX-005,平均捨石質量,fix,4,平均捨石質量,,SitsumonKind=19,
+AX-006,透明度区分能力補正係数,fix,12,透明度区分能力補正係数,,SitsumonKind=19,
+AX-007,潮待ち区分能力補正係数,fix,15,潮待ち区分能力補正係数,,SitsumonKind=19,
+AX-008,水深区分能力補正係数,fix,17,水深区分能力補正係数,,SitsumonKind=19,
+AX-009,港湾安全対策工事区分,auto,3,港湾安全対策工事区分(固定),自動選択(AutoSelectJoken),SitsumonKind=19,
+AX-010,クレーン類計上区分,fix,9,クレーン類計上区分,,SitsumonKind=19,
+AX-011,クローラクレーン機械機種区分,auto,11,クローラクレーン機械機種区分(固定),"デフォルト実行 (SitsumonExecuteKind=1, SekisanEnv連動なし)",SitsumonKind=19,
+AX-012,クローラクレーンの規格選択(機械駆動),fix,33,クローラクレーンの規格選択(機械駆動),,SitsumonKind=19,

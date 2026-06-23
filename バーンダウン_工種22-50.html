@@ -30,7 +30,7 @@
       <div style="margin-top:6px;">・#51〜#57 はバッファ（50工種到達のための予備）。</div>
     </div>
   </div>
-  <div style="margin-top:10px;font-size:11px;color:#9ca3af;">最終更新：2026-06-22（#24・#30・#34〜#38・#40 合格／#31・#32・#33・#39 スキップ。#40は条件選択(B-24改)＋片道距離(ShortCut等価)を補完、規格0.7は正・積込区分は0.7経路で不要(B-25解消)。回帰33工種一致(#16は同種ShortCut是正で再ベースライン／#34/#35はcheck_alignment由来のstep1.5既知差分・step3不変)。6/26は東京出張で非稼働＝目標/予測線を稼働日按分）</div>
+  <div style="margin-top:10px;font-size:11px;color:#9ca3af;">最終更新：2026-06-23（#24・#30・#34〜#38・#40〜#45 合格／#31〜#33・#39 スキップ。#43〜#45=潜水士船運転費への送り変数(KG/KG2)値270→320を観点化。#44/#45は潜水士船が既定経路で未計上のためroute_finderで到達経路(労務編成=玉掛・玉外片方水中)を前提列に強制し実計上の上で観点表示。回帰38工種一致(#34/#35はstep1.5既知差分)。6/26東京出張で非稼働＝目標/予測線を稼働日按分）</div>
 </div>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
@@ -57,11 +57,11 @@
     {no:38,name:'FEP敷設',status:'done',date:'2026-06-19'},
     {no:39,name:'工場塗装',status:'skip',date:'2026-06-19'},
     {no:40,name:'小型不整地運搬車',status:'done',date:'2026-06-22'},
-    {no:41,name:'既製ｺﾝｸﾘｰﾄ杭打工',status:'pending'},
-    {no:42,name:'解析等調査業務費',status:'pending'},
-    {no:43,name:'捨石本均し(潜水)',status:'pending'},
-    {no:44,name:'ﾌﾞﾛｯｸ転置',status:'pending'},
-    {no:45,name:'ﾌﾞﾛｯｸ据付',status:'pending'},
+    {no:41,name:'既製ｺﾝｸﾘｰﾄ杭打工',status:'done',date:'2026-06-23'},
+    {no:42,name:'解析等調査業務費',status:'done',date:'2026-06-23'},
+    {no:43,name:'捨石本均し(潜水)',status:'done',date:'2026-06-23'},
+    {no:44,name:'ﾌﾞﾛｯｸ転置',status:'done',date:'2026-06-23'},
+    {no:45,name:'ﾌﾞﾛｯｸ据付',status:'done',date:'2026-06-23'},
     {no:46,name:'異形ﾌﾞﾛｯｸ製作',status:'pending'},
     {no:47,name:'ﾀｲﾀﾞｳﾝﾘﾝｸﾞ設置工',status:'pending'},
     {no:48,name:'接地極工事',status:'pending'},
@@ -91,7 +91,7 @@
   var ideal = dates.map(function(_,i){ return +(TOTAL*(1 - cumWork[i]/totalWork)).toFixed(2); });
 
   // ---- 実績：日付ごとの残工種数（消化=done/skip）----
-  var today = '2026-06-22';
+  var today = '2026-06-23';
   var actual = dates.map(function(dt){
     var key=ymd(dt);
     if(key>today) return null; // 未来は未記入

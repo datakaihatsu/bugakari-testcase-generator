@@ -498,40 +498,67 @@ class ColumnTCGenerator:
         return out
 
     def _child_daika_checks(self):
-        """新提案B (#15 FB): 子代価(Sitsumon011)へ送る変数の増減・計上先変更を
-        差分検知し、「子代価選択肢が意図通りか」の確認観点を出す。
-        例: 15 質問No50 鉄筋工 F2削除/F7追加・計上先 28968→20301。"""
+        """新提案B (#15 FB) + 運転費拡張 (2026-06-23 #43): 子代価(Sitsumon011)・
+        運転費(Sitsumon014)へ送る変数の増減・計上先変更・**値変更**を差分検知し、
+        「○○の選択肢/計上が意図通りか」の確認観点を出す。
+        例: #15 鉄筋工 F2削除/F7追加・計上先28968→20301 / #43 運転費 送り変数KGの値270→320。"""
         if getattr(self, '_child_daika_cache', None) is not None:
             return self._child_daika_cache
         base = self.old_json or (self.ref_json if self._ref_comparable() else None)
         out = []
         if base is not None:
-            om = {e['SitsumonNo']: e for e in base.data.get('Sitsumon011', [])}
+            obk = {k.get('VarName'): k for k in base.data.get('KeisanItem', []) if k.get('VarName')}
+            nbk = {k.get('VarName'): k for k in self.new_json.data.get('KeisanItem', []) if k.get('VarName')}
 
             def send_vars(e):
                 return [s.get('SendVarName') or s.get('CurVarName')
                         for s in (e.get('SendItemList') or [])]
-            for n in self.new_json.data.get('Sitsumon011', []):
-                no = n['SitsumonNo']
-                o = om.get(no)
-                if not o:
-                    continue
-                ov, nv = send_vars(o), send_vars(n)
-                added = [v for v in nv if v not in ov]
-                removed = [v for v in ov if v not in nv]
-                bits = []
-                if added:
-                    bits.append('追加:' + ','.join(added))
-                if removed:
-                    bits.append('削除:' + ','.join(removed))
-                keijo = (str(o.get('KeijoSakiTankaCD') or '')
-                         != str(n.get('KeijoSakiTankaCD') or ''))
-                if bits or keijo:
-                    nm = self.new_json.get_sitsumon_name(no)
-                    detail = ('送り変数の変更 ' + ' '.join(bits)) if bits else ''
-                    if keijo:
-                        detail = (detail + ' / ' if detail else '') + '計上先変更'
-                    out.append((no, f'・子代価「{nm}」の選択肢が意図通りか({detail})'))
+
+            def cur_vars(e):
+                return [s.get('CurVarName') for s in (e.get('SendItemList') or [])
+                        if s.get('CurVarName')]
+
+            def _valstr(k):
+                return k.get('Value') if k.get('Value') is not None else k.get('Expression')
+
+            # Sitsumon011=子代価(計上先=KeijoSakiTankaCD) / Sitsumon014=運転費(計上先=DefaultKoshuCD)
+            for key, label, keijo_f, suffix in (
+                    ('Sitsumon011', '子代価', 'KeijoSakiTankaCD', '選択肢'),
+                    ('Sitsumon014', '運転費', 'DefaultKoshuCD', '計上')):
+                om = {e['SitsumonNo']: e for e in base.data.get(key, [])}
+                for n in self.new_json.data.get(key, []):
+                    no = n['SitsumonNo']
+                    o = om.get(no)
+                    if not o:
+                        continue
+                    ov, nv = send_vars(o), send_vars(n)
+                    added = [v for v in nv if v not in ov]
+                    removed = [v for v in ov if v not in nv]
+                    # 送り変数(CurVarName)の計算表値変更を検知 (#43 KG 270→320)
+                    oc = set(cur_vars(o))
+                    val_changed = []
+                    for cv in dict.fromkeys(cur_vars(n)):
+                        if cv not in oc:
+                            continue
+                        ok_, nk_ = obk.get(cv), nbk.get(cv)
+                        if (ok_ and nk_ and
+                                (ok_.get('Value'), ok_.get('Expression'))
+                                != (nk_.get('Value'), nk_.get('Expression'))):
+                            val_changed.append(f'{cv}:{_valstr(ok_)}→{_valstr(nk_)}')
+                    keijo = (str(o.get(keijo_f) or '') != str(n.get(keijo_f) or ''))
+                    bits = []
+                    if added:
+                        bits.append('追加:' + ','.join(added))
+                    if removed:
+                        bits.append('削除:' + ','.join(removed))
+                    if val_changed:
+                        bits.append('値変更:' + ','.join(val_changed))
+                    if bits or keijo:
+                        nm = self.new_json.get_sitsumon_name(no)
+                        detail = ('送り変数の変更 ' + ' '.join(bits)) if bits else ''
+                        if keijo:
+                            detail = (detail + ' / ' if detail else '') + '計上先変更'
+                        out.append((no, f'・{label}「{nm}」の{suffix}が意図通りか({detail})'))
         self._child_daika_cache = out
         return out
 
@@ -806,6 +833,100 @@ class ColumnTCGenerator:
 
 
     def generate(self):
+        # 到達経路探査 (#44/#45 潜水士船): 運転費(Sitsumon014)の「値変更」観点があるのに
+        #   その運転費が既定経路で計上されない場合、route_finder で到達に必要な分岐選択を
+        #   逆算し、合成 fix 軸(前提列)として plan に追加する。これにより
+        #   (a)積算が運転費計上ルートを通る (b)前提列に到達条件が出る
+        #   (c)既存の値変更観点が tc_visited を満たして表示される、が同時に成立。
+        #   ガード: 運転費の値変更観点が既定未到達のときのみ発火 → 他工種へ波及しない。
+        self._route_gate_sits = set()
+        try:
+            from route_finder import find_route_to_sitsumon
+        except Exception:
+            find_route_to_sitsumon = None
+        if find_route_to_sitsumon is not None and self.plan is not None:
+            _d14_nos = {e['SitsumonNo']
+                        for e in self.new_json.data.get('Sitsumon014', [])}
+            _base_forced = {}
+            for _ax in self.plan:
+                _f = _ax.get('強制行ID', '')
+                if _f:
+                    try:
+                        _base_forced[int(_ax['SitsumonNo'])] = int(_f)
+                    except ValueError:
+                        pass
+            _base_vis = set(FlowWalker(self.new_json, vary_selections=dict(_base_forced))
+                            .walk().get('visited_sitsumons', []))
+            _ax_by_sit = {int(_ax['SitsumonNo']): _ax for _ax in self.plan}
+            _kind_by_sit = {sx['SitsumonNo']: sx.get('SitsumonKind')
+                            for sx in self.new_json.data.get('SitsumonItem', [])}
+            _all_route = {}
+            for _sn, _txt in self._child_daika_checks():
+                if _sn not in _d14_nos or '値変更' not in _txt or _sn in _base_vis:
+                    continue
+                _route = find_route_to_sitsumon(self.new_json, _sn)
+                if not _route:
+                    continue
+                _all_route.update(_route)
+                for _gsn, _grid in _route.items():
+                    _exist = _ax_by_sit.get(_gsn)
+                    if _exist is not None:
+                        # 既存軸: 既定行のままだと到達経路を外すので到達側の行を強制
+                        _exist['種別'] = 'fix'
+                        _exist['強制行ID'] = str(_grid)
+                        if '到達経路' not in (_exist.get('変更理由') or ''):
+                            _exist['変更理由'] = ((_exist.get('変更理由') or '')
+                                                  + ' 運転費計上のための到達経路').strip()
+                    else:
+                        _new_ax = {
+                            '種別': 'fix',
+                            'SitsumonNo': str(_gsn),
+                            '軸ID': f'GATE{_gsn}',
+                            '軸名': self.new_json.get_sitsumon_name(_gsn),
+                            '列ラベル': self.new_json.get_sitsumon_name(_gsn),
+                            '強制行ID': str(_grid),
+                            '変更理由': '運転費計上のための到達経路(差分外・前提条件)',
+                            '備考': 'route_finder到達ゲート',
+                        }
+                        self.plan.append(_new_ax)
+                        _ax_by_sit[_gsn] = _new_ax
+                    self._route_gate_sits.add(_gsn)
+            # 強制経路で「新たに開く」選択質問(Kind19/17)を前提列に追加。
+            #   step2計画は既定経路ベースのため、水中ルートで開く質問(例 #44
+            #   「潜水士船の作業区分」「港湾安全対策工事区分」)が抜ける。積算完了に
+            #   必要なので前提列(fix軸=その経路での選択行)として出す。
+            if _all_route:
+                _fr = dict(_base_forced)
+                _fr.update(_all_route)
+                _fr_walk = FlowWalker(self.new_json, vary_selections=_fr).walk()
+                _fr_sel = _fr_walk.get('sit_selections', {})
+                for _q in _fr_walk.get('visited_sitsumons', []):
+                    if _q in _base_vis or _q in _ax_by_sit:
+                        continue
+                    if _kind_by_sit.get(_q) not in (17, 19):
+                        continue
+                    _qrow = _all_route.get(_q)
+                    if _qrow is None:
+                        _qrow = _fr_sel.get(_q)
+                    if _qrow is None:
+                        continue
+                    _new_ax = {
+                        '種別': 'fix',
+                        'SitsumonNo': str(_q),
+                        '軸ID': f'GATE{_q}',
+                        '軸名': self.new_json.get_sitsumon_name(_q),
+                        '列ラベル': self.new_json.get_sitsumon_name(_q),
+                        '強制行ID': str(_qrow),
+                        '変更理由': '運転費計上ルートで開く前提条件(差分外)',
+                        '備考': 'route_finder到達前提',
+                    }
+                    self.plan.append(_new_ax)
+                    _ax_by_sit[_q] = _new_ax
+                    self._route_gate_sits.add(_q)
+            if self._route_gate_sits:
+                print('  [到達探査] 運転費計上のため前提条件を追加: '
+                      + ', '.join(f'Sit{g}' for g in sorted(self._route_gate_sits)))
+
         vary_axes = [ax for ax in self.plan if ax['種別'] == 'vary']
         fix_or_auto_axes = [ax for ax in self.plan if ax['種別'] in ('fix', 'auto')]
 
@@ -1385,7 +1506,7 @@ class ColumnTCGenerator:
                 if _nc_sn is not None and _nc_sn not in tc_visited:
                     continue
                 checks.append(_nc_text)
-            # 新提案B: 子代価の送り変数増減・計上先変更の確認観点 (#15)
+            # 新提案B: 子代価/運転費の送り変数増減・計上先・値変更の確認観点 (#15/#43)
             for _cd_sn, _cd_text in self._child_daika_checks():
                 if _cd_sn not in tc_visited:
                     continue

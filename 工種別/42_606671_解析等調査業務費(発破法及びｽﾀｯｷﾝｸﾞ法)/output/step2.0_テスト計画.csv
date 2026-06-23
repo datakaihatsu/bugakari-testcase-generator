@@ -1,0 +1,6 @@
+軸ID,軸名,種別,SitsumonNo,列ラベル,変更理由,備考,強制行ID
+AX-001,解析等調査業務費,fix,1,解析等調査業務費,,SitsumonKind=19,
+AX-002,補正係数の入力方法,fix,3,補正係数の入力方法,,SitsumonKind=19,
+AX-003,測線延長(発破法4km、スタッキング法1.5kmまで),fix,2,測線延長(発破法4km、スタッキング法1.5kmまで),,SitsumonKind=17,
+AX-004,作業工程区分,fix,10,作業工程区分,,SitsumonKind=19,
+AX-005,安全費率計上区分,auto,4,安全費率計上区分(固定),"デフォルト実行 (SitsumonExecuteKind=1, SekisanEnv連動なし)",SitsumonKind=19,

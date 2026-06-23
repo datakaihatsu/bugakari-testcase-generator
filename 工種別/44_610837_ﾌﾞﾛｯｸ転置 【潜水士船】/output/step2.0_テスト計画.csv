@@ -1,0 +1,9 @@
+軸ID,軸名,種別,SitsumonNo,列ラベル,変更理由,備考,強制行ID
+AX-001,標準作業時間,fix,4,標準作業時間,,SitsumonKind=17,
+AX-002,ブロック種類能力係数(本体ブロック),fix,5,ブロック種類能力係数(本体ブロック),,SitsumonKind=19,
+AX-003,施工区分能力係数,fix,8,施工区分能力係数,,SitsumonKind=19,
+AX-004,ブロック質量の適用方法,fix,33,ブロック質量の適用方法,,SitsumonKind=19,
+AX-005,ブロック質量の選択(0～100t),fix,34,ブロック質量の選択(0～100t),,SitsumonKind=19,
+AX-006,ウインチ移動,fix,14,ウインチ移動,,SitsumonKind=19,
+AX-007,作業機械の変更,fix,15,作業機械の変更,,SitsumonKind=19,
+AX-008,労務編成,fix,30,労務編成,,SitsumonKind=19,
