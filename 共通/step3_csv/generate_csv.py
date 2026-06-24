@@ -625,10 +625,13 @@ class ColumnTCGenerator:
         return None
 
     def _daika_output_s(self):
-        """期待値列に出す S 変数を「代価表に上がるもの」だけに厳選する。
-        判定: Column を持つ DaikaItemLine が SuryoRitsuLinkKeisanItemCD で参照する
-        KeisanItem(D*R 等)の式に(再帰的に)現れる S 変数。代価表行の登場順で重複排除。
-        Column=None の行(代価表の列に乗らない=非出力)は対象外。
+        """期待値列に出す変数を「代価表に計上される変数」から特定する。
+        基本は従来どおり代価表出力行(DaikaItemCD有)の数量率(SuryoRitsuLinkKeisanItemCD)を辿る。
+        ★最小改修(2026-06-24 #99): 数量率の式が**単一変数**の行は、その実体変数を出す
+          (S名に限定しない。例 #99 D5R=S_ZR を従来は取りこぼしていた)。
+          複雑式の行は従来どおり内部の S番号 を辿る(既存工種の挙動を保つ)。
+        計上リンクが一切無い構造(例:00)は KeisanItem 定義の Sn 番号順フォールバック(従来どおり)。
+        ※フロー計上(Sitsumon105)は別系統のため本関数では出さない(00破壊回避)。
         """
         import re
         by_var = self.new_json.keisan_by_varname
@@ -654,20 +657,21 @@ class ColumnTCGenerator:
             v = cd2var.get(l.get('SuryoRitsuLinkKeisanItemCD'))
             if v:
                 any_link = True
-            if not v:
+            if not v or l.get('DaikaItemCD') is None:
                 continue
-            # 数量率リンク(SuryoRitsuLink)と代価(DaikaItemCD)を持つ行は代価表に計上される
-            #   出力行 → 期待値対象。Column の有無では除外しない
-            #   (#28: D1R〜D3R は Column=None でも計上される。数量@計算で S1〜S3 が出る)。
-            if l.get('DaikaItemCD') is None:
-                continue
-            for sv in s_in(v, set()):
-                if sv not in ordered:
-                    ordered.append(sv)
+            # この行の数量率の式が単一変数なら、その実体を出力変数とする(S名問わず)。
+            k = by_var.get(v)
+            expr = (k.get('Expression') or '').strip() if k else ''
+            if expr and re.fullmatch(r"[A-Za-z~][A-Za-z0-9~_']*", expr):
+                if expr not in ordered:
+                    ordered.append(expr)
+            else:
+                # 複雑式: 従来どおり内部の S番号 を辿る(既存工種の挙動維持)
+                for sv in s_in(v, set()):
+                    if sv not in ordered:
+                        ordered.append(sv)
         if not any_link:
-            # フォールバック: 代価表行がリンク(SuryoRitsuLinkKeisanItemCD)を一切持たない
-            # 構造(例: 00 裏込砕石工)では、KeisanItem に定義(Value/Expression)を持つ Sn を
-            # 番号順に出力対象とする。定義の無い空 S (例: 02 の S2) は出さない。
+            # フォールバック(従来どおり): 例 00 裏込砕石工。KeisanItem定義のSnを番号順。
             cands = []
             for k in self.new_json.data.get('KeisanItem', []):
                 v = k.get('VarName')
