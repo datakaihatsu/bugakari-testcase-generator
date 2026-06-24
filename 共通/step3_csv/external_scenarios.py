@@ -67,6 +67,29 @@ def _is_external(v, defined_expr, owned):
     return (v not in owned) and (v not in defined_expr)
 
 
+def _root_external(v, by_expr, owned, _seen=None):
+    """v が外部変数(またはその単一エイリアス)なら、根の外部変数名を返す。でなければ None。
+    例 (#99): SE~P は KeisanItem 定義 Expression='O~Sep' の単一エイリアス → 根 O~Sep(O~接頭辞=外部)。
+    エイリアス連鎖を辿り、O~接頭辞 or 未定義(=外部) に行き着けばそれを返す。"""
+    if not v:
+        return None
+    _seen = _seen or set()
+    if v in _seen:
+        return None
+    _seen.add(v)
+    if v.startswith('O~') or v.startswith('O‾'):
+        return v
+    e = (by_expr.get(v) or '').strip()
+    if e and re.fullmatch(r"[A-Za-z~][A-Za-z0-9~_\']*", e):
+        r = _root_external(e, by_expr, owned, _seen)
+        if r:
+            return r
+    # 定義(式/値)も所有(質問変数)も無い = 外部入力変数
+    if (v not in by_expr) and (v not in owned):
+        return v
+    return None
+
+
 def _joken_value(joken):
     mk, mv = joken.get('MaxKigou'), joken.get('MaxValue')
     nk, nv = joken.get('MinKigou'), joken.get('MinValue')
@@ -153,6 +176,15 @@ def detect_scenarios(old_json_path, new_json_path):
     defined_expr = {k.get('VarName') for k in new.get('KeisanItem', [])
                     if k.get('VarName') and k.get('Expression')}
     owned = _owned_vars(new)
+    # T1過剰抑制(#99): AutoSelectJoken を多数(>=ENUM_TH)駆動する変数は「選択肢列挙ドライバ」
+    #   (例 H30j1=鉄筋規格コード・101行駆動)であり、外部分岐ではない。各値でシナリオ生成すると
+    #   規格選択が爆発する(27件)。通常の vary 軸で網羅されるため T1 では除外する。
+    from collections import Counter as _Counter
+    _autojoken_drive = _Counter(
+        (r.get('AutoSelectJoken') or {}).get('VarName')
+        for s in new.get('Sitsumon019', []) for r in s.get('SitTabRows', [])
+        if (r.get('AutoSelectJoken') or {}).get('VarName'))
+    _ENUM_TH = 10
 
     scenarios = []
     seen = set()
@@ -204,6 +236,8 @@ def detect_scenarios(old_json_path, new_json_path):
             v = j.get('VarName')
             if not _is_external(v, defined_expr, owned):
                 continue
+            if _autojoken_drive.get(v, 0) >= _ENUM_TH:
+                continue  # 選択肢列挙ドライバ(規格コード等)はvary軸で網羅・外部分岐でない
             val = _joken_value(j)
             if val is None:
                 continue
@@ -229,6 +263,37 @@ def detect_scenarios(old_json_path, new_json_path):
             scenarios.append({'var': v, 'value': val, 'label': label,
                               'newly_reached': sorted(newly), 'kind': 'question',
                               'user_reach_budget_exceeded': over_budget})
+
+    # T3: 新規タブ(SitTab)の TabJoken が外部変数==値で開く (#99 東京都建設局タブ=SE~P==13)。
+    #   タブはフロー到達でなく TabJoken 条件で表示される表示バリアントなので、
+    #   AutoSelectJoken と同じ要領で条件を読み、外部(エイリアス解決含む)なら別シナリオ生成。
+    by_expr = {k.get('VarName'): k.get('Expression')
+               for k in new.get('KeisanItem', []) if k.get('VarName')}
+
+    def _tab_key(t):
+        return (t.get('SitsumonNo'), t.get('TabNo', 0), t.get('TabMesho'))
+    old_tab_keys = {_tab_key(t) for t in old.get('SitTab', [])}
+    for t in new.get('SitTab', []):
+        if _tab_key(t) in old_tab_keys:
+            continue  # 新規追加タブのみ
+        j = t.get('TabJoken') or {}
+        rv = _root_external(j.get('VarName'), by_expr, owned)
+        if not rv:
+            continue
+        val = _joken_value(j)
+        if val is None:
+            continue
+        dv = _default_value(rv, new)
+        if dv is not None and dv == val:
+            continue
+        if (rv, val) in seen:
+            continue
+        seen.add((rv, val))
+        tmesho = (t.get('TabMesho') or '').strip()
+        scenarios.append({'var': rv, 'value': val,
+                          'label': f'{rv}={val:g}' + (f'_{tmesho}' if tmesho else ''),
+                          'newly_reached': [], 'kind': 'tab'})
+
     return scenarios
 
 

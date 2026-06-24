@@ -30,7 +30,7 @@
       <div style="margin-top:6px;">・#51〜#57 はバッファ（50工種到達のための予備）。</div>
     </div>
   </div>
-  <div style="margin-top:10px;font-size:11px;color:#9ca3af;">最終更新：2026-06-23（#24・#30・#34〜#38・#40〜#45 合格／#31〜#33・#39 スキップ。#43〜#45=潜水士船運転費への送り変数(KG/KG2)値270→320を観点化。#44/#45は潜水士船が既定経路で未計上のためroute_finderで到達経路(労務編成=玉掛・玉外片方水中)を前提列に強制し実計上の上で観点表示。回帰38工種一致(#34/#35はstep1.5既知差分)。6/26東京出張で非稼働＝目標/予測線を稼働日按分）</div>
+  <div style="margin-top:10px;font-size:11px;color:#9ca3af;">最終更新：2026-06-24（残りは#46(異形ﾌﾞﾛｯｸ製作=子代価多工種)のみ。#47名称変更/#49値修正=新視点ゼロ・#48単位/名称・#50質問変数削除＝既存パターン再演のためスキップ。#44/#45潜水士船route_finder・期待値列を代価表計上変数基準に改修(8工種再BL/回帰34一致)・B-22タブ外部条件検知(東京都建設局S_ZR=1030)・#99臨時。6/26東京出張で非稼働）</div>
 </div>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
@@ -63,12 +63,15 @@
     {no:44,name:'ﾌﾞﾛｯｸ転置',status:'done',date:'2026-06-23'},
     {no:45,name:'ﾌﾞﾛｯｸ据付',status:'done',date:'2026-06-23'},
     {no:46,name:'異形ﾌﾞﾛｯｸ製作',status:'pending'},
-    {no:47,name:'ﾀｲﾀﾞｳﾝﾘﾝｸﾞ設置工',status:'pending'},
-    {no:48,name:'接地極工事',status:'pending'},
-    {no:49,name:'削り取り',status:'pending'},
-    {no:50,name:'ﾌﾞﾛｯｸ積込運搬据付',status:'pending'}
+    {no:47,name:'ﾀｲﾀﾞｳﾝﾘﾝｸﾞ設置工',status:'skip',date:'2026-06-24'},
+    {no:48,name:'接地極工事',status:'skip',date:'2026-06-24'},
+    {no:49,name:'削り取り',status:'skip',date:'2026-06-24'},
+    {no:50,name:'ﾌﾞﾛｯｸ積込運搬据付',status:'skip',date:'2026-06-24'},
+    {no:99,name:'鉄筋加工(臨時)',status:'done',date:'2026-06-24',temp:true}
   ];
-  var TOTAL = items.length; // 29
+  // 臨時工種(#99等 temp:true)はスプリント(#22-50)の線計算から除外し、グリッドにのみ表示
+  var SPRINT = items.filter(function(it){return !it.temp;});
+  var TOTAL = SPRINT.length; // 29 (#22-50)
 
   // ---- 日付軸：6/15 → 6/30 ----
   var start = new Date(2026,5,15), end = new Date(2026,5,30);
@@ -91,18 +94,18 @@
   var ideal = dates.map(function(_,i){ return +(TOTAL*(1 - cumWork[i]/totalWork)).toFixed(2); });
 
   // ---- 実績：日付ごとの残工種数（消化=done/skip）----
-  var today = '2026-06-23';
+  var today = '2026-06-24';
   var actual = dates.map(function(dt){
     var key=ymd(dt);
     if(key>today) return null; // 未来は未記入
-    var resolved = items.filter(function(it){
+    var resolved = SPRINT.filter(function(it){
       return (it.status==='done'||it.status==='skip') && it.date && it.date<=key;
     }).length;
     return TOTAL - resolved;
   });
 
-  var doneCnt = items.filter(function(it){return it.status==='done';}).length;
-  var skipCnt = items.filter(function(it){return it.status==='skip';}).length;
+  var doneCnt = SPRINT.filter(function(it){return it.status==='done';}).length;
+  var skipCnt = SPRINT.filter(function(it){return it.status==='skip';}).length;
   var remain = TOTAL - doneCnt - skipCnt;
 
   // ---- 消化予測線（実績ペースの外挿）----
