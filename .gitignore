@@ -15,7 +15,7 @@ gemini-code-*.md
 # 工種別/**/output/
 
 # 積算ソフトの参照ソース (機密・初回参照のみ)
-共通/source_ref/
+**/source_ref/
 
 # IDE
 .vscode/
