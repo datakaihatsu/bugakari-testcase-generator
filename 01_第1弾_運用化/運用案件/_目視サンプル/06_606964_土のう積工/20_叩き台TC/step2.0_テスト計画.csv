@@ -1,0 +1,9 @@
+軸ID,軸名,種別,SitsumonNo,列ラベル,変更理由,備考,強制行ID
+AX-001,作業区分,vary,1,作業区分,新規工種:全選択肢網羅,SitsumonKind=19,
+AX-002,作業内容区分,auto,10,作業内容区分(固定),自動確定 (AutoSelectJokenの駆動変数が確定),SitsumonKind=19,
+AX-003,作業内容省庁区分,auto,4,作業内容省庁区分(固定),自動確定 (AutoSelectJokenの駆動変数が確定),SitsumonKind=19,
+AX-004,作業内容,vary,2,作業内容,新規工種:全選択肢網羅,SitsumonKind=19,
+AX-005,資材計上区分,vary,8,資材計上区分,新規工種:全選択肢網羅,SitsumonKind=19,
+AX-006,購入土計上区分,vary,11,購入土計上区分,新規工種:全選択肢網羅,SitsumonKind=19,
+AX-007,作業内容,vary,3,作業内容,新規工種:全選択肢網羅,SitsumonKind=19,
+AX-008,作業内容,vary,9,作業内容,新規工種:全選択肢網羅,SitsumonKind=19,

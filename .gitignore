@@ -24,3 +24,7 @@ gemini-code-*.md
 # Office 一時ロックファイル
 ~$*
 .~lock.*#
+
+# 一時(mount)・再生成可能な検証作業ディレクトリ
+.fuse_hidden*
+01_第1弾_運用化/運用案件/_精度検証/_work/
