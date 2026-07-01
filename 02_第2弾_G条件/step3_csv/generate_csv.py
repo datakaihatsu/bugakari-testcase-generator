@@ -1267,6 +1267,7 @@ class ColumnTCGenerator:
             print(f'  [列除外] 自動確定/定数: {len(col_excluded)}件 -> '
                   + ', '.join(ax['軸名'] for ax in col_excluded))
 
+        self._axes_columns_out = list(axes_columns)   # 第2弾G条件が列->質問No対応を得る用(出力不変)
         headers, s_present = self._build_headers(axes_columns)
         # Fix1: 同名の並行分岐質問(別SitsumonNo・同一表示名)を1列に統合する。
         #   旧→新で質問番号が振り直され、混合深さ等で機械計上の質問セットが
