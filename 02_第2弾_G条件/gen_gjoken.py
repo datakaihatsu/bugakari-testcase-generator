@@ -33,6 +33,7 @@ for p in ('engine', 'step2_proposals', 'step3_csv'):
 
 from bugakari_json import BugakariJSON                   # noqa: E402
 from generate_proposals_new import run as run_plan_new   # noqa: E402
+from generate_proposals import TestPlanGenerator         # noqa: E402
 from generate_csv import ColumnTCGenerator               # noqa: E402
 
 
@@ -131,6 +132,34 @@ def build_g(json_path, out_dir=None, label=None):
     run_plan_new(json_path, plan_csv)
     gen = ColumnTCGenerator(plan_csv, json_path)
     rows = gen.generate()
+
+    # --- 規格名計上のエコー計上変数 ---
+    #   列にならない自動確定エコー質問(例: 12 機械区分71=機械質量区分のエコー)が
+    #   規格名計上を持つ場合、その計上は「行駆動変数(例 J2)を設定する質問=選択条件」で
+    #   決まる。よってエコー質問の行駆動変数を集め、その変数を書き込む列に○を付ける
+    #   (合格TCが 機械区分 を規格名計上と観点化するのと整合)。
+    _vis = TestPlanGenerator(None, json_path)  # UI可視判定(列になるか)用
+    echo_kikaku_vars = set()
+    for _s in bj.data.get('SitsumonItem', []):
+        _sn = _s.get('SitsumonNo')
+        if not gen._has_kikaku_keijo(_sn):
+            continue
+        if _vis._is_ui_visible_axis(_s):
+            continue  # 自身が列になる質問は列側で○が付く
+        _s019 = bj.sitsumon019_by_no.get(_sn)
+        if not _s019:
+            continue
+        for _r in _s019.get('SitTabRows', []):
+            _v = (_r.get('AutoSelectJoken') or {}).get('VarName')
+            if _v:
+                echo_kikaku_vars.add(_v)
+
+    def _writes_vars(sit_no):
+        s019 = bj.sitsumon019_by_no.get(sit_no)
+        if not s019:
+            return set()
+        return {c.get('VarName') for c in s019.get('SitCols', []) if c.get('VarName')}
+
     axcols = list(getattr(gen, '_axes_columns_out', []))   # 列->質問No対応(順序=CSV軸列順)
     header = rows[0]
     data = [r for r in rows[1:] if r and r[0].startswith('TC')]
@@ -225,8 +254,14 @@ def build_g(json_path, out_dir=None, label=None):
                 rid = r.get('row_id')
                 if d and rid in rid2label and d not in disp2label:
                     disp2label[d] = rid2label[rid]
+        # 規格名計上: この条件(グループ内いずれかの質問)が規格名/規格を代価表へ計上するか。
+        #   判定は TC生成側 ColumnTCGenerator._has_kikaku_keijo を再利用(KikakuKeijoGaia9 /
+        #   ShortCut継承 / SitTabCols.KikakuKeijoNaiyo)。合格TCの規格名計上列と整合。
+        kikaku = (any(gen._has_kikaku_keijo(int(s)) for s in sits)
+                  or any(_writes_vars(int(s)) & echo_kikaku_vars for s in sits))
         g_list.append({'name': name, 'vals': merged, 'opt_labels': opt_labels,
-                       'label2mk': label2mk, 'disp2label': disp2label, 'numeric': numeric})
+                       'label2mk': label2mk, 'disp2label': disp2label, 'numeric': numeric,
+                       'kikaku': kikaku})
 
     # --- 分岐の注: 統合列の"-"パターンから導出 ---
     notes = []
@@ -255,6 +290,8 @@ def build_g(json_path, out_dir=None, label=None):
     name, unit = _header(bj)
     out = []
     out.append(['施工区分/入力条件'] + [f'G{i+1}' for i in range(len(g_list))])
+    # 規格名計上行は G番号の直下(2行目)に置き、条件名→選択肢の並びを隣接させる。
+    out.append(['規格名計上'] + ['○' if g.get('kikaku') else '' for g in g_list])
     out.append(['各種(条件名)'] + [g['name'] for g in g_list])
     maxopt = max((len(g['opt_labels']) for g in g_list), default=0)
     for oi in range(maxopt):
