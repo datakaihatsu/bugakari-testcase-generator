@@ -233,6 +233,10 @@ class TestPlanGenerator:
         #   帰結表示なので軸(列)から除外する。例: 02 積算区分(136/149), 03 省庁区分/資料区分。
         if self._is_autodetermined(sit):
             return False
+        # 年度切替用 等: レベル変数・行駆動変数がともに凍結定数で、JSON内で毎回同一行へ
+        #   自動確定する質問はユーザ軸でない (2026-07-03 07 フィードバック)。
+        if self._levelvar_frozen_autoselected(sit):
+            return False
         # J6: ShortCutSitsumonNo を持つ場合、ShortCut先 Sit が UI 可視判定をパスする
         #     なら ShortCut元 Sit も UI 表示される (画面に出る参照表示)。
         #     ShortCut先が除外対象 (MinKigou 内部分岐 等) なら ShortCut元も除外。
@@ -340,6 +344,78 @@ class TestPlanGenerator:
             return True
         k = self.new_json.keisan_by_varname.get(v)
         return bool(k and (k.get('Value') is not None or k.get('Expression')))
+
+    def _is_frozen_const_var(self, v):
+        """変数が『凍結定数』か = KeisanItem に Value を持ち、Expression/Keisan を持たず、
+        どの Sitsumon019 SitCol でも設定されず、外部(O~)にも依存しない。
+        → 到達前から値が固定で TC 間で不変。年度切替の MIF_N(=定数)/LE_N1(=定数) 等。
+        計算式変数(例: 21 rsskH/LEVsk)は上流ユーザ選択で変わりうるので False。"""
+        if not v:
+            return False
+        if self._depends_on_external(v):
+            return False
+        k = self.new_json.keisan_by_varname.get(v)
+        if not k:
+            return False
+        if k.get('Expression') or k.get('Keisan'):
+            return False
+        if k.get('Value') is None:
+            return False
+        for s in self.new_json.data.get('Sitsumon019', []):
+            for c in s.get('SitCols', []):
+                if c.get('VarName') == v:
+                    return False
+        return True
+
+    def _var_mesho(self, v):
+        k = self.new_json.keisan_by_varname.get(v) if v else None
+        return (k.get('Mesho') or '').strip() if k else ''
+
+    def _levelvar_frozen_autoselected(self, sit):
+        """『使用年度区分』(年度版切替) の内部機構質問か (例: 07 年度切替用 Sit76)。
+        条件を全て満たすとき軸(列)から除外する:
+          (1) レベル変数が凍結定数 (LE_N1=定数2)
+          (2) 全行駆動変数が凍結定数で、実際にどれかの行を自動選択する (MIF_N=定数1→行固定)
+          (3) レベル変数・行駆動変数がいずれも『使用年度区分』系 (Mesho に "使用年度")
+        → ユーザが選ばない年度版切替の内部確定 → 除外。
+        ※ (3) が要: 07 市場単価の日当り施工量補正有無(Sit28) は (1)(2) を満たすが年度系でない
+          (合格TCでは固定列として残る) ので巻き込まない。構造だけでは両者を区別できないため
+          年度切替の意味シグナルで限定する。
+        ※ レベル変数が計算式(例: 21 資材計上区分 LEVsk) の質問は (1) で対象外 → 残す。
+        (2026-07-03 07 フィードバック: 条件自動確定変数を追えば歩掛JSON内で確定可能)"""
+        lv = sit.get('LevelVarName')
+        if not self._is_frozen_const_var(lv):
+            return False
+        if '使用年度' not in self._var_mesho(lv):
+            return False
+        no = sit.get('SitsumonNo')
+        s019 = self.new_json.sitsumon019_by_no.get(no)
+        if not s019:
+            sc = sit.get('ShortCutSitsumonNo')
+            if sc:
+                s019 = self.new_json.sitsumon019_by_no.get(sc)
+        if not s019:
+            return False
+        self._baseline_walk()
+        any_selected = False
+        for r in s019.get('SitTabRows', []):
+            rf = r.get('RowFlags')
+            if isinstance(rf, list) and 1 in rf:
+                continue
+            j = r.get('AutoSelectJoken') or {}
+            v = j.get('VarName')
+            if not v:
+                continue
+            if not self._is_frozen_const_var(v):
+                return False  # 式/外部依存の行駆動 → TC間で変わりうる → 除外しない
+            if '使用年度' not in self._var_mesho(v):
+                return False  # 年度切替でない駆動 → 除外しない (Sit28 市場単価日当り)
+            val = self._resolve_value(v)
+            if val is None:
+                val = 0.0
+            if self._joken_selects(j, val):
+                any_selected = True
+        return any_selected
 
     def _resolve_value(self, v):
         """駆動変数の最終値を非strict評価(未定義は既定値)で求める。実積算の自動選択に近い。"""

@@ -66,9 +66,13 @@ class NewKotsuPlanGenerator:
         ]
 
     def _discover_reachable(self):
-        """全分岐を辿って到達質問の集合と初出順を返す。"""
+        """全分岐を辿って到達質問の集合と初出順を返す。
+        併せて各分岐走査の変数スコープ(hyo._user_inputs)を self._branch_scopes に収集する
+        (generate() の『上流選択で開く条件』補完に使う)。"""
         order = []
         seen = set()
+        self._branch_scopes = []
+        _scope_keys = set()
 
         def add_seq(seq):
             for sn in seq:
@@ -76,8 +80,19 @@ class NewKotsuPlanGenerator:
                     seen.add(sn)
                     order.append(sn)
 
-        base = FlowWalker(self.bj).walk()
-        add_seq(base.get('visited_sitsumons', []))
+        def capture(walker):
+            try:
+                sc = dict(walker.hyo._user_inputs)
+            except Exception:
+                return
+            key = frozenset(sc.items())
+            if key not in _scope_keys:
+                _scope_keys.add(key)
+                self._branch_scopes.append(sc)
+
+        base_w = FlowWalker(self.bj)
+        add_seq(base_w.walk().get('visited_sitsumons', []))
+        capture(base_w)
 
         changed = True
         guard = 0
@@ -92,9 +107,11 @@ class NewKotsuPlanGenerator:
                 if len(rows) < 2:
                     continue
                 for rid in rows:
-                    res = FlowWalker(self.bj, vary_selections={sn: rid}).walk()
+                    w = FlowWalker(self.bj, vary_selections={sn: rid})
+                    res = w.walk()
                     before = len(seen)
                     add_seq(res.get('visited_sitsumons', []))
+                    capture(w)
                     if len(seen) > before:
                         changed = True
         return order
@@ -102,6 +119,14 @@ class NewKotsuPlanGenerator:
     def generate(self):
         order = self._discover_reachable()
         auto = self._auto  # 検証済み TestPlanGenerator (可視ゲート/自動確定判定を共用)
+        # 『分岐で開く条件』補完の重複ガード用: 通常の可視ゲートを通る質問名の集合。
+        #   同名が既に正規の軸として出るなら、隠れ質問の補完で重複列を作らない
+        #   (例: 21 側溝規格 は Sit33 が既に可視軸 → Sit34 の補完はしない)。
+        _visible_names = set()
+        for _sn in order:
+            _s = self.bj.sitsumon_by_no.get(_sn)
+            if _s and _s.get('SitsumonKind') in (17, 19) and auto._is_ui_visible_axis(_s):
+                _visible_names.add(_s.get('Mesho', ''))
         plan = []
         for sn in order:
             sit = self.bj.sitsumon_by_no.get(sn)
@@ -124,6 +149,18 @@ class NewKotsuPlanGenerator:
             #   _is_ui_visible_axis 内の _var_is_determined が「JSON内で確定する変数値で
             #   確定するロジック」に相当 (例: 21 省庁分岐/材料区分)。
             if not auto._is_ui_visible_axis(sit):
+                # 差分モードと同等の補完(generate_proposals L837-868): baseline では駆動変数が
+                #   行を自動選択して隠れるが、上流 vary 選択で駆動変数が範囲の隙間に落ちて
+                #   『開く』質問は、ユーザ入力軸として残す (#40 条件選択: 運搬物種別=セメント
+                #   →FG1=8 が Row の範囲外 → 開く)。_opens_on_forced_route は全駆動が
+                #   スコープに直接確定&外部でない&確定Kigouでどの行も選ばない時のみ真(安全側)。
+                if (len(self._selectable_rows(sn)) >= 2
+                        and name not in _visible_names
+                        and any(auto._opens_on_forced_route(sn, sc)
+                                for sc in getattr(self, '_branch_scopes', []))):
+                    plan.append([self._next_id(), name, 'vary', sn, name,
+                                 '分岐で開く条件 (上流選択で駆動変数が範囲外→開く)', note, ''])
+                    continue
                 plan.append([self._next_id(), name, 'auto', sn, f'{name}(固定)',
                              '自動確定 (UI非可視: 変数確定/内部分岐)', note, ''])
                 continue
