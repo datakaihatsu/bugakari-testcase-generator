@@ -101,6 +101,7 @@ class NewKotsuPlanGenerator:
 
     def generate(self):
         order = self._discover_reachable()
+        auto = self._auto  # 検証済み TestPlanGenerator (可視ゲート/自動確定判定を共用)
         plan = []
         for sn in order:
             sit = self.bj.sitsumon_by_no.get(sn)
@@ -117,31 +118,64 @@ class NewKotsuPlanGenerator:
             if kind not in (17, 19):
                 continue
 
-            if self._is_default_exec(sit):
+            # ── (1) UI可視ゲート (TC作成スクリプトと共用) ──────────────────
+            #   開かない質問 = 条件自動確定で制御されるもの (AutoSelectJoken の駆動変数が
+            #   JSON内で確定/内部分岐/"="mesho/ShortCut先が非可視 等) は列に出さない。
+            #   _is_ui_visible_axis 内の _var_is_determined が「JSON内で確定する変数値で
+            #   確定するロジック」に相当 (例: 21 省庁分岐/材料区分)。
+            if not auto._is_ui_visible_axis(sit):
                 plan.append([self._next_id(), name, 'auto', sn, f'{name}(固定)',
-                             'デフォルト実行 (SitsumonExecuteKind=1, SekisanEnv連動なし)', note, ''])
+                             '自動確定 (UI非可視: 変数確定/内部分岐)', note, ''])
                 continue
+
             if kind == 17:
                 plan.append([self._next_id(), name, 'fix', sn, name, '', note, ''])
                 continue
-            # kind == 19
+
+            # ── (2) kind==19 の種別判定 (TC作成スクリプト L716-738 に準拠) ──
+            #   ※ baseline行出所 src=='auto' による除外は行わない。差分モードでは
+            #     差分軸(旧→新で変化)は vary に昇格するため baseline-auto でも列に残る
+            #     (例: 17 クレーン賃料補正率)。差分を持たない新規モードで src=='auto' を
+            #     一律除外すると、こうした「本来出す」軸まで落とすため不採用。
+            #     決定A(代替経路も出す=多めに出す)に整合。
             rows = self._selectable_rows(sn)
-            if len(rows) >= 2:
-                # 自動確定検知: AutoSelectJoken の駆動変数が上流で確定し、最終値が
-                #   行を自動選択する質問はユーザが選ばない (例: 17 クレーン規格、駆動変数 L~CK)。
-                #   vary にすると選択肢分の直積爆発を起こすため auto に降格する。
-                if self._auto._is_autodetermined(sit):
-                    plan.append([self._next_id(), name, 'auto', sn, f'{name}(固定)',
-                                 '自動確定 (AutoSelectJokenの駆動変数が確定)', note, ''])
+            if sit.get('LevelVarName'):
+                # レベル変数を持つ質問は「実効実行種別」= レベル変数の最終値で開閉が決まる
+                #   (仕様§1.5)。ExecKind ではなく値で判定する:
+                #     値2 = デフォルト選択(初回不要だが再選択可能) → 開く(列に残す)
+                #     値3 = 必ず実行(ユーザ入力)                   → 開く(vary)
+                #     値0 = 機能OFF/計設定確定 / 値1 = 閉(非表示)   → 出さない(auto)
+                #   (値1は上流の _is_ui_visible_axis で既に除外済み)
+                try:
+                    lvval = float(auto._resolve_value(sit.get('LevelVarName')))
+                except Exception:
+                    lvval = None
+                if lvval in (2.0, 3.0):
+                    if len(rows) >= 2:
+                        plan.append([self._next_id(), name, 'vary', sn, name,
+                                     f'レベル変数=開(値{lvval:g}: 再選択可能/必ず実行)', note, ''])
+                    else:
+                        plan.append([self._next_id(), name, 'fix', sn, name,
+                                     f'レベル変数=デフォルト選択・再選択可能(値{lvval:g})', note, ''])
                 else:
-                    plan.append([self._next_id(), name, 'vary', sn, name, '新規工種:全選択肢網羅', note, ''])
-            else:
-                # 選択可能行が1件だけ = ユーザに選ぶ余地が無い選択質問。
-                #   到達しても実機では「自動確定」され UI 選択列にはならない
-                #   (例: 10 No18 労務費の適用。上流 No16/17 が条件自動で確定した
-                #    結果到達するが選択肢は1件のみ)。列に出さず auto 扱いにする。
+                    plan.append([self._next_id(), name, 'auto', sn, f'{name}(固定)',
+                                 f'自動確定 (レベル変数値={lvval}: 閉/機能OFF)', note, ''])
+            elif auto._all_rows_autoselect(sit):
+                # 全選択可能行が AutoSelectJoken 条件付き = ユーザが直接選ばない範囲表。
                 plan.append([self._next_id(), name, 'auto', sn, f'{name}(固定)',
-                             '自動確定 (選択肢1件・選択の余地なし)', note, ''])
+                             '自動確定 (全選択可能行がAutoSelectJoken付き)', note, ''])
+            elif self._is_default_exec(sit):
+                # 純デフォルト実行 (ExecKind=1 + Flags⊆{105,108}) = 問われず固定実行。
+                plan.append([self._next_id(), name, 'auto', sn, f'{name}(固定)',
+                             'デフォルト実行 (SitsumonExecuteKind=1, SekisanEnv連動なし)', note, ''])
+            elif len(rows) >= 2:
+                plan.append([self._next_id(), name, 'vary', sn, name,
+                             '新規工種:全選択肢網羅', note, ''])
+            else:
+                # 選択可能行が1件 = デフォルト選択で初回表示され再選択可能な質問
+                #   (例: 22 スタビライザ/タイヤローラ排ガス機械の選択)。列に残す (fix)。
+                plan.append([self._next_id(), name, 'fix', sn, name,
+                             'デフォルト選択・再選択可能 (選択肢1件)', note, ''])
         return plan
 
 
