@@ -1,6 +1,6 @@
 <!DOCTYPE html>
 <meta charset="utf-8">
-<title>テスト自動化ロードマップ ― 3段階構造化</title>
+<title>テスト自動化ロードマップ ― 4段階構造化</title>
 <style>
   :root{
     --ground:#F4F6F8; --surface:#FFFFFF; --surface-2:#FBFCFD;
@@ -161,7 +161,7 @@
 
   /* ---------- timeline strip ---------- */
   .axis{
-    display:grid;grid-template-columns:repeat(3,1fr);gap:0;margin:0 0 26px;
+    display:grid;grid-template-columns:repeat(4,1fr);gap:0;margin:0 0 26px;
     border:1px solid var(--line);border-radius:8px;overflow:hidden;background:var(--surface)
   }
   .axis .seg{padding:14px 20px}
@@ -170,28 +170,33 @@
   .axis .ms{font-family:var(--mono);font-weight:700;font-size:14px;margin-top:4px}
   .axis .seg1 .ms{color:var(--primary)}
   .axis .seg2 .ms{color:var(--accent)}
-  .axis .seg3 .ms{color:var(--ink-soft)}
+  .axis .seg3 .ms{color:var(--good)}
+  .axis .seg4 .ms{color:var(--ink-soft)}
   .axis .dsc{font-size:13px;color:var(--ink-soft);margin-top:3px}
 
   /* ---------- phase cards ---------- */
-  .phases{display:grid;grid-template-columns:repeat(3,1fr);gap:18px}
+  .phases{display:grid;grid-template-columns:repeat(4,1fr);gap:14px;position:relative}
+  .roadmap .wrap{max-width:1240px}
   @media(max-width:960px){.phases{grid-template-columns:1fr}}
   .phase{border:1px solid var(--line);border-radius:10px;background:var(--surface);overflow:hidden;display:flex;flex-direction:column}
   .phase .head{padding:20px 24px 18px;border-bottom:1px solid var(--line-soft)}
   .p1 .head{background:linear-gradient(180deg,var(--primary-tint),#fff)}
   .p2 .head{background:linear-gradient(180deg,var(--accent-tint),#fff)}
-  .p3{border-style:dashed;border-color:#CAD1DA}
-  .p3 .head{background:linear-gradient(180deg,#EEF1F4,#fff)}
+  .p3 .head{background:linear-gradient(180deg,var(--good-tint),#fff)}
+  .p4{border-style:dashed;border-color:#CAD1DA}
+  .p4 .head{background:linear-gradient(180deg,#EEF1F4,#fff)}
   .phase .ptag{display:flex;align-items:center;gap:10px;margin-bottom:6px}
   .phase .pnum{font-family:var(--mono);font-size:12px;font-weight:700;padding:3px 9px;border-radius:3px;letter-spacing:.05em;white-space:nowrap;flex:none}
   .p1 .pnum{background:var(--primary);color:#fff}
   .p2 .pnum{background:var(--accent);color:#fff}
-  .p3 .pnum{background:var(--ink-soft);color:#fff}
+  .p3 .pnum{background:var(--good);color:#fff}
+  .p4 .pnum{background:var(--ink-soft);color:#fff}
   .phase .pms{font-family:var(--mono);font-size:11.5px;color:var(--ink-soft);letter-spacing:.04em}
   .pstat{font-family:var(--mono);font-size:10.5px;font-weight:700;letter-spacing:.06em;padding:3px 9px;border-radius:3px;margin-left:auto;white-space:nowrap}
   .pstat.done{background:var(--good-tint);color:var(--good);border:1px solid #BFD9C9}
   .pstat.now{background:var(--accent);color:#fff;border:1px solid var(--accent)}
   .pstat.plan{background:#F0F1F3;color:var(--muted);border:1px solid var(--line)}
+  .pstat.next{background:var(--good-tint);color:var(--good);border:1px solid #BFD9C9}
   .phase .head h3{font-size:18px;margin:0;font-weight:740;line-height:1.4}
   .phase .head .sub{font-size:13px;color:var(--ink-soft);margin:7px 0 0}
 
@@ -211,6 +216,11 @@
   .badge.nw{background:var(--accent-tint);color:var(--accent);border:1px solid #E3C3AC}
   .badge.ex{background:var(--primary-tint);color:var(--primary);border:1px solid #C6D9E8}
   .badge.hu{background:#F0F1F3;color:var(--ink-soft);border:1px solid var(--line)}
+  .badge.mv{background:var(--good-tint);color:var(--good);border:1px solid #BFD9C9}
+  .flow li.gone{opacity:.5}
+  .flow li.gone::before{background:#F0F1F3;border-color:var(--line);color:var(--muted)}
+  .flow li.gone .ft{text-decoration:line-through;text-decoration-color:#C9B0A2;color:var(--muted);font-weight:600}
+  .flow li.gone .fd{color:var(--muted)}
 
   .phase .foot{margin-top:auto;padding:16px 24px 20px;border-top:1px dashed var(--line);background:var(--surface-2)}
   .phase .foot .fl{font-family:var(--mono);font-size:11px;letter-spacing:.1em;text-transform:uppercase;color:var(--muted);margin-bottom:6px}
@@ -218,7 +228,8 @@
   .phase .foot .res b{font-size:16px}
   .p1 .foot .res b{color:var(--primary)}
   .p2 .foot .res b{color:var(--accent)}
-  .p3 .foot .res b{color:var(--ink-soft)}
+  .p3 .foot .res b{color:var(--good)}
+  .p4 .foot .res b{color:var(--ink-soft)}
 
   .legend{display:flex;flex-wrap:wrap;gap:16px;margin-top:20px;font-size:12.5px;color:var(--ink-soft)}
   .legend span{display:inline-flex;align-items:center;gap:7px}
@@ -242,9 +253,11 @@
   tr.s1 .rowlab{color:var(--primary)}
   tr.s2{background:var(--accent-tint)}
   tr.s2 .rowlab{color:var(--accent)}
-  tr.s3{background:#EEF1F4}
-  tr.s3 .rowlab{color:var(--ink-soft)}
-  tr.s3 td{color:var(--muted)}
+  tr.s3{background:var(--good-tint)}
+  tr.s3 .rowlab{color:var(--good)}
+  tr.s4{background:#EEF1F4}
+  tr.s4 .rowlab{color:var(--ink-soft)}
+  tr.s4 td{color:var(--muted)}
   .big{font-size:17px;font-weight:700}
   .note{font-size:12.5px;color:var(--muted);margin-top:12px;line-height:1.7}
   .note code{font-family:var(--mono);background:#EFF1F4;padding:1px 5px;border-radius:3px;font-size:11.5px;color:var(--ink-soft)}
@@ -388,10 +401,10 @@
   </section>
 
   <!-- ROADMAP -->
-  <section>
+  <section class="roadmap">
     <div class="wrap">
-      <div class="seclabel"><span class="no">05</span><h2 style="margin:0">3段階ロードマップ</h2><span class="ln"></span></div>
-      <p class="sechint">まず第1弾で②(テストケース作成)を運用に乗せ、続けて第2弾で③(条件作成/J条件)へ橋を渡す。さらに第3弾で改定後の積算基準そのものから条件を起こし、自動化を100%へ近づける（第3弾は未知領域＝実現性の確認から）。</p>
+      <div class="seclabel"><span class="no">05</span><h2 style="margin:0">4段階ロードマップ</h2><span class="ln"></span></div>
+      <p class="sechint">まず第1弾で②(テストケース作成)を運用に乗せ、第2弾で③(条件作成/J条件)へ橋を渡す。第3弾で改定後JSONをスクリプトで模擬実行し、生成TCどおりかの合否を Gaia 無しで自動判定（回帰化）。さらに第4弾で改定後の積算基準そのものから条件を起こし、自動化を100%へ近づける（第4弾は未知領域＝実現性の確認から）。</p>
 
       <div class="axis">
         <div class="seg seg1">
@@ -405,8 +418,13 @@
           <div class="dsc">③ G条件(J条件)を生成 → ②へ橋渡し（条件からTCを生成）＝ 約80%削減</div>
         </div>
         <div class="seg seg3">
-          <div class="per">その先 ・ 構想</div>
+          <div class="per">次の一手 ・ 構想</div>
           <div class="ms">第3弾</div>
+          <div class="dsc">改定後JSONを模擬実行し 生成TCで合否を自動判定（Gaia不要・回帰化）＝ テスト実行の約1/4を機械化・約1.33倍へ</div>
+        </div>
+        <div class="seg seg4">
+          <div class="per">その先 ・ 構想</div>
+          <div class="ms">第4弾</div>
           <div class="dsc">改定後の基準から G条件を直接生成 → 改定内容の盛り込みも自動化 ＝ 100%へ</div>
         </div>
       </div>
@@ -436,14 +454,14 @@
           <div class="head">
             <div class="ptag"><span class="pnum">第2弾</span><span class="pms">条件(G条件)の叩き台</span><span class="pstat now">● 着手中・いまここ</span></div>
             <h3>③ G条件(J条件)を生成し ②へ橋を渡す</h3>
-            <p class="sub">③「条件作成(J条件/詳細設計)」領域へ踏み込む。G条件＝「施工単価入力基準表」の様式で人が編集する中間フォーマット。新ロジック2本＋乖離1.5拡張。</p>
+            <p class="sub">③「条件作成(J条件/詳細設計)」領域へ踏み込む。G条件＝「施工単価入力基準表」の様式で人が編集する中間フォーマット。新ロジック2本（G条件逆生成＋TC生成）。検証工程は第3弾へ移設。</p>
           </div>
           <ol class="flow">
             <li class="new"><span class="ft">既存JSONから G条件 を逆生成<span class="badge nw">新規</span></span><span class="fd">JSONの条件を「施工単価入力基準表」（J1..Jn＋分岐の注記）の様式で書き出す。修正方針の“上級情報”＝詳細設計の粗さを埋める叩き台。</span></li>
-            <li><span class="ft">人が改定後 G条件を作る<span class="badge hu">人</span></span><span class="fd">増えた条件選択を挿入＝改定後J条件の条件部分を組む。</span></li>
-            <li class="new"><span class="ft">G条件 → 改定後TC を生成<span class="badge nw">新規</span></span><span class="fd">③(条件)から②(テストケース)へ橋を渡して生成する。</span></li>
-            <li class="new"><span class="ft">G条件＋生成TC を改定後JSONと乖離チェック<span class="badge nw">1.5拡張</span></span><span class="fd">人作成のG条件と生成TCの両方を突き合わせて検証する。</span></li>
-            <li><span class="ft">人が基準＋G条件で実装し、生成TCでテスト<span class="badge hu">人</span></span><span class="fd">テストファーストを阻害せず、上級情報(G条件)＋TC生成を両立。</span></li>
+            <li id="p2s2"><span class="ft">人が改定後 G条件を作る<span class="badge hu">人</span></span><span class="fd">増えた条件選択を挿入＝改定後J条件の条件部分を組む。</span></li>
+            <li class="new" id="p2s3"><span class="ft">G条件 → 改定後TC を生成<span class="badge nw">新規</span></span><span class="fd">③(条件)から②(テストケース)へ橋を渡して生成する。</span></li>
+            <li class="gone"><span class="ft">G条件＋生成TC を改定後JSONと乖離チェック<span class="badge mv">→第3弾へ</span></span><span class="fd">検証工程は第3弾（合否・回帰の自動化）へ移設。</span></li>
+            <li class="gone"><span class="ft">人が基準＋G条件で実装し、生成TCでテスト<span class="badge mv">→第3弾へ</span></span><span class="fd">生成TCでのテストは第3弾でスクリプト自動化。人は実装に専念。</span></li>
           </ol>
           <div class="foot">
             <div class="fl">生産性 仮説</div>
@@ -451,16 +469,36 @@
           </div>
         </div>
 
-        <!-- PHASE 3 -->
+        <!-- PHASE 3 (NEW: 合否・回帰の自動化) -->
         <div class="phase p3">
           <div class="head">
-            <div class="ptag"><span class="pnum">第3弾</span><span class="pms">構想 ・ 未知領域</span><span class="pstat plan">構想</span></div>
+            <div class="ptag"><span class="pnum">第3弾</span><span class="pms">合否・回帰の自動化</span><span class="pstat next">構想 ・ 次の一手</span></div>
+            <h3>改定後JSONを模擬実行し 生成TCで自動テスト</h3>
+            <p class="sub">第2弾④⑤を巻き取る。Gaia積算シミュレート不要。改定後JSONをスクリプトで模擬的に動かし、生成TCの計上集合と一致するか自動判定。計上行・数値の正しさは人が最終確認＝範疇外。</p>
+          </div>
+          <ol class="flow">
+            <li><span class="ft">生成TCを人がチェック → 承認版を基準に固定<span class="badge hu">人</span></span><span class="fd">計上行・数値の是非は人が担保。承認済みTCを回帰の基準に据える。</span></li>
+            <li class="new" id="p3sim"><span class="ft">改定後JSONを模擬実行（計上判定を条件で解決）<span class="badge nw">新規</span></span><span class="fd">Gaiaを介さずスクリプトで、条件選択に対し出る明細を再現する。</span></li>
+            <li class="new"><span class="ft">生成TCと突き合わせ 適合判定（合否を自動）<span class="badge nw">新規</span></span><span class="fd">実装(JSON)が仕様(生成TC)どおり計上するか。改定漏れ・実装バグを検出。</span></li>
+            <li class="new"><span class="ft">全条件組合せの網羅・実行可能性チェック<span class="badge nw">新規</span></span><span class="fd">分岐の抜け・デッドパス・二重計上を自動で洗い出す。</span></li>
+            <li><span class="ft">人は計上行の妥当性・数値の正しさに専念<span class="badge hu">人</span></span><span class="fd">機械が適合を潰した後、人は是非の最終確認だけに集中。</span></li>
+          </ol>
+          <div class="foot">
+            <div class="fl">生産性 仮説（構想）</div>
+            <div class="res">テスト実行の重複（2名通し・シナリオ/単体）から <b>約1/4</b> を機械化 → 歩掛全体で <b>約1.33倍</b>。合否は <b>Gaia無し</b> の回帰で確実化</div>
+          </div>
+        </div>
+
+        <!-- PHASE 4 (旧 第3弾) -->
+        <div class="phase p4">
+          <div class="head">
+            <div class="ptag"><span class="pnum">第4弾</span><span class="pms">構想 ・ 未知領域</span><span class="pstat plan">構想</span></div>
             <h3>改定後の積算基準から G条件を直接生成</h3>
             <p class="sub">第2弾で人が担う「改定内容の盛り込み」まで自動化する到達点。未知領域のため、まず実現性の確認から。</p>
           </div>
           <ol class="flow">
-            <li class="new"><span class="ft">改定後の基準から G条件を起こせるか<span class="badge nw">実現性確認</span></span><span class="fd">改定後の積算基準を入力に、G条件を生成できるか。第3弾はこの見極めが出発点。</span></li>
-            <li class="new"><span class="ft">基準 → G条件 の自動生成<span class="badge nw">新規</span></span><span class="fd">改定後の基準から条件を起こす＝人の「改定内容の盛り込み」を不要にする。</span></li>
+            <li class="new"><span class="ft">改定後の基準から G条件を起こせるか<span class="badge nw">実現性確認</span></span><span class="fd">改定後の積算基準を入力に、G条件を生成できるか。第4弾はこの見極めが出発点。</span></li>
+            <li class="new" id="p4s2"><span class="ft">基準 → G条件 の自動生成<span class="badge nw">新規</span></span><span class="fd">改定後の基準から条件を起こす＝人の「改定内容の盛り込み」を不要にする（第2弾②の人手を自動化）。</span></li>
             <li><span class="ft">G条件 → TC まで一気通貫</span><span class="fd">改定後の基準を入れれば TC まで到達。人はレビューに専念。</span></li>
           </ol>
           <div class="foot">
@@ -479,7 +517,7 @@
 
       <div class="insight sym" style="margin-top:24px">
         <span class="k">対称性</span>
-        <p>3段階は<span>同じ型を一段ずつ上流へ</span>。第1弾＝<b>TCの叩き台</b>、第2弾＝<b>条件(G条件)の叩き台</b>、第3弾＝<b>改定後の基準から条件を直接生成</b>。エンジンが人の手作業を下流から順に巻き取り、最後は「改定内容の盛り込み」まで自動化して100%へ近づく。</p>
+        <p><span>入力を上流へ3段、検証をスクリプトへ1段</span>。第1弾＝<b>TCの叩き台</b>、第2弾＝<b>条件(G条件)の叩き台</b>、第3弾＝<b>合否・回帰の自動化</b>（Gaia不要）、第4弾＝<b>改定後の基準から条件を直接生成</b>。エンジンが人の手作業を下流から順に巻き取り、最後は「改定内容の盛り込み」まで自動化して100%へ近づく。</p>
       </div>
     </div>
   </section>
@@ -488,7 +526,7 @@
   <section class="alt">
     <div class="wrap">
       <div class="seclabel"><span class="no">06</span><h2 style="margin:0">生産性の仮説数値</h2><span class="ln"></span></div>
-      <p class="sechint">歩掛設計の全工数は年間 約14,431h。そのうち②テストケース作成が 3,859h（26.6%）を占める。ここを段階的に圧縮したとき、歩掛全体にどれだけ効くかを示す（第3弾＝改定後の基準から条件を直接生成は未知領域＝実現性の確認から）。</p>
+      <p class="sechint">歩掛設計の全工数は年間 約14,431h。そのうち②テストケース作成が 3,859h（26.6%）を占める。ここを段階的に圧縮したとき、歩掛全体にどれだけ効くかを示す（第4弾＝改定後の基準から条件を直接生成は未知領域＝実現性の確認から）。</p>
 
       <div class="tablewrap">
         <table>
@@ -505,46 +543,4 @@
             <tr class="now">
               <td class="rowlab">現状<span class="mut">手作業</span></td>
               <td class="num">30〜60h</td>
-              <td class="num">—</td>
-              <td class="num">—</td>
-              <td class="num">1.0倍</td>
-            </tr>
-            <tr class="s1">
-              <td class="rowlab">第1弾<span class="mut">叩き台＋乖離/合否 ・ 完了</span></td>
-              <td class="num big">15〜30h</td>
-              <td class="num">50%</td>
-              <td class="num">−約 1,930 h</td>
-              <td class="num big">約1.15倍</td>
-            </tr>
-            <tr class="s2">
-              <td class="rowlab">第2弾<span class="mut">G条件生成＋②橋渡し ・ 着手中</span></td>
-              <td class="num big">6〜12h</td>
-              <td class="num">80%</td>
-              <td class="num">−約 3,090 h</td>
-              <td class="num big">約1.27倍</td>
-            </tr>
-            <tr class="s3">
-              <td class="rowlab">第3弾<span class="mut">基準から条件を直接生成（構想）</span></td>
-              <td class="num">レビューのみ</td>
-              <td class="num">→100%へ</td>
-              <td class="num">−最大約 3,860 h</td>
-              <td class="num">約1.37倍</td>
-            </tr>
-          </tbody>
-        </table>
-      </div>
-      <p class="note">
-        この表は本プロジェクト（②③）単独の寄与。<b style="color:var(--ink)">「1案件あたり」＝歩掛改定1件のテストケース作成にかかる工数</b>（重量級で30〜60h）。第3弾まで到達すれば歩掛全体で <b style="color:var(--ink)">約1.37倍</b>。会社目標の生産性200%（≒2倍）は、これに別PJ（①規模感算出）と歩掛データ作成の手戻り削減が積み上がって到達する想定。
-        <br>※ 第3弾の「100%」・第2弾の「80%」は到達目標の仮置き（裏取りは第3弾の検討時に行う）。
-      </p>
-    </div>
-  </section>
-
-  <footer>
-    <div class="wrap">
-      <span>歩掛JSONテストケース自動生成エンジン ／ テスト自動化ロードマップ</span>
-      <span class="mono">v1.1 ・ 2026-07-02 ・ 第1弾=完了 / 第2弾=着手中 ・ 整理: ②テスト作成 N / ③条件作成 S</span>
-    </div>
-  </footer>
-
-</div>
+              <td class=
