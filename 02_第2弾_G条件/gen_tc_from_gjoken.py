@@ -152,8 +152,23 @@ def read_gjoken(path):
 # 20 ↔ 30 の突合 (列マッチ・選択肢マッチ)
 # ------------------------------------------------------------------
 
+def _strip_tail_paren(s):
+    return str(s).rstrip(')）').rstrip()
+
+
+def _prefix_bonus(o, nw):
+    """B-7(#27): 注記追加型rename(旧ラベル+「(床版桁を除く)」等)の検出。
+    旧が新の接頭辞(末尾括弧無視。逆=注記削除も同様)なら1。
+    SequenceMatcher.ratioは接尾辞追加に長さペナルティがかかり、同名系列
+    (T桁⇔床版桁)のたすき掛けの方が高スコアになる誤ペアリングを防ぐ。
+    ※被覆率(一致文字率)方式は短ラベル(22 20cm以下⇔0.2m以下)で誤爆するため不採用。"""
+    a, b = _strip_tail_paren(o), _strip_tail_paren(nw)
+    return 1 if a and b and (b.startswith(a) or a.startswith(b)) else 0
+
+
 def _best_pairs(olds, news, cutoff=0.4):
-    """類似度でペアリング。returns (pairs[(old,new)], removed[old], added[new])"""
+    """類似度でペアリング。returns (pairs[(old,new)], removed[old], added[new])
+    スコアは(接頭辞一致, ratio)の辞書順(B-7)。"""
     olds = list(olds)
     news = list(news)
     pairs = []
@@ -168,7 +183,7 @@ def _best_pairs(olds, news, cutoff=0.4):
         for nw in news:
             r = difflib.SequenceMatcher(None, o, nw).ratio()
             if r >= cutoff:
-                cand.append((r, o, nw))
+                cand.append(((_prefix_bonus(o, nw), r), o, nw))
     cand.sort(reverse=True)
     used_o, used_n = set(), set()
     for r, o, nw in cand:
@@ -320,6 +335,47 @@ def _edit_sit(data, sit_no, dels, renames, adds):
     return applied_adds
 
 
+_STD_MARK = re.compile(r'[（(]※標準[）)]')
+
+
+def _fix_default_row_for_marker_move(data, sits, renames):
+    """B-6(#24): renameペアで「(※標準)」が別選択肢へ移動した場合、
+    擬似JSONの既定行(SitTab.DefaultRowID)を移動先の行へ書き換える。
+    既定行はタブ/フロー側(SitTab)に保持され、セル文字の書換だけでは追随しないため
+    (24 表層: 実改定後はフローボックス全面付け替えで既定行も更新されるが、
+    擬似JSON=改定前フローは旧既定(未対策)のまま→基準行が1行余分になる)。
+    安全側: 現在の DefaultRowID がマーカー喪失行と一致する場合のみ書き換える。"""
+    lost = [(o, n) for o, n in renames.items()
+            if _STD_MARK.search(o) and not _STD_MARK.search(n)]
+    gained = [(o, n) for o, n in renames.items()
+              if not _STD_MARK.search(o) and _STD_MARK.search(n)]
+    if not (lost and gained):
+        return
+    for sit in sits:
+        for s in data.get('Sitsumon019', []):
+            if s.get('SitsumonNo') != sit:
+                continue
+            cells = s.get('SitTabCells', [])
+
+            def rid_of(label):  # rename適用後のラベルで行を引く
+                for c in cells:
+                    if _norm(c.get('Value')) == label:
+                        return c.get('RowID')
+                return None
+
+            old_rid = rid_of(lost[0][1])     # 旧既定行(マーカー喪失後のラベル)
+            new_rid = rid_of(gained[0][1])   # 新既定行(マーカー獲得後のラベル)
+            if new_rid is None:
+                continue
+            for t in data.get('SitTab', []):
+                if (t.get('SitsumonNo') == sit and
+                        t.get('DefaultRowID') not in (None, 0) and
+                        (old_rid is None or t.get('DefaultRowID') == old_rid)):
+                    t['DefaultRowID'] = new_rid
+                    print(f"  既定行移動(※標準): Sit{sit} "
+                          f"DefaultRowID {old_rid}→{new_rid}")
+
+
 def build_pseudo_json(json_path, g20_analysis, diffs, g20, g30, out_path):
     """改定前JSONにG条件差分(既存質問分)を適用した擬似改定後JSONを作る。"""
     bj, gen, g_list, _ = g20_analysis
@@ -372,10 +428,14 @@ def build_pseudo_json(json_path, g20_analysis, diffs, g20, g30, out_path):
             first = glist[0]
             if first.get('sits'):
                 reached = {first['sits'][0]}
+        all_sits = []
         for g in glist:
             for sit in g['sits']:
                 got = _edit_sit(data, sit, d['dels'], d['renames'], [])
                 added_labels.extend(got)
+                all_sits.append(sit)
+        if d['renames']:
+            _fix_default_row_for_marker_move(data, all_sits, d['renames'])
         add_ok = False
         if adds:
             for g in glist:
@@ -406,11 +466,24 @@ def promote_gate_axes(plan_csv, gate_names):
         if len(r) < 6:
             continue
         label = re.sub(r'\(固定\)$', '', r[4]).strip()
-        if (r[1].strip() in gate_names or label in gate_names) and r[2] in ('fix', 'auto'):
-            r[2] = 'vary'
-            r[4] = label
-            r[5] = f'業務ルール(G条件ゲート): {label}の切替が新規条件/計上に影響'
-            changed.append(label)
+        if r[1].strip() in gate_names or label in gate_names:
+            if r[2] in ('fix', 'auto'):
+                r[2] = 'vary'
+                r[4] = label
+                r[5] = f'業務ルール(G条件ゲート): {label}の切替が新規条件/計上に影響'
+                changed.append(label)
+            elif (r[2] == 'vary' and '業務ルール' not in str(r[5])
+                  and '選択肢テキスト変更' in str(r[5])
+                  and '追加' not in str(r[5]) and '削除' not in str(r[5])):
+                # B-7(#27): 純粋な「選択肢テキスト変更」varyのゲート軸は、step3の
+                #   「既定行+最長行」剪定(新提案A)で非既定選択肢の経路が消えることが
+                #   ある(27 桁区分=最長行が既定行と同一に縮退)。ゲート軸は全選択肢
+                #   網羅が必要(新規列が非既定選択肢で開く)なため業務ルールを併記。
+                #   ※追加/削除混在varyはflow_equiv代表行(分岐網羅)が正なので対象外
+                #   (06 作業内容で回帰行が変わるデグレを確認済み)。
+                r[5] = (f"{r[5]}; 業務ルール(G条件ゲート): "
+                        f"{label}の切替が新規条件/計上に影響")
+                changed.append(label)
     BugakariJSON.write_csv(rows, plan_csv)
     return changed
 
@@ -802,12 +875,27 @@ def run(csv20, csv30, old_json, out_dir=None):
     run_step2(s1, pseudo, s2, old_json)
 
     # 新規列をゲートする既存条件を vary 昇格
-    gate_names = set()
+    # B-7(#27): ただし「全選択肢が対象列を閉じる」ゲート(例 27 注4/5 歩掛=有/無とも
+    #   埋設型枠を閉じる=対象列は当該質問の非到達経路でのみ開く)は、切替では対象列を
+    #   開けないため昇格しない(余分なvary軸が行構造を崩す)。
+    by_src = {}
     for nt in g30['notes']:
-        if any(t in diffs['new_cols'] for t in nt['targets']):
-            nm30 = g30['cols'][nt['src_g']]['name'] if nt['src_g'] < len(g30['cols']) else nt['src_name']
-            gate_names.add(nm30)
-            gate_names.add(nt['src_name'])
+        tgts = [t for t in nt['targets'] if t in diffs['new_cols']]
+        if not tgts:
+            continue
+        e = by_src.setdefault(nt['src_g'], {'names': set(), 'closed': {}})
+        nm30 = g30['cols'][nt['src_g']]['name'] if nt['src_g'] < len(g30['cols']) else nt['src_name']
+        e['names'].add(nm30)
+        e['names'].add(nt['src_name'])
+        for t in tgts:
+            e['closed'].setdefault(t, set()).add(nt['src_choice'])
+    gate_names = set()
+    for src_g, e in by_src.items():
+        opts = set(g30['cols'][src_g]['opts']) if 0 <= src_g < len(g30['cols']) else set()
+        if not opts or any(opts - ch for ch in e['closed'].values()):
+            gate_names |= e['names']
+        else:
+            print(f"【vary昇格スキップ(全選択肢が対象列を閉じる)】{sorted(e['names'])}")
     if gate_names:
         changed = promote_gate_axes(s2, gate_names)
         if changed:
