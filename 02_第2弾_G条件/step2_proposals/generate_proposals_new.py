@@ -72,6 +72,7 @@ class NewKotsuPlanGenerator:
         order = []
         seen = set()
         self._branch_scopes = []
+        self._branch_visited = []  # 各スコープと対をなす到達質問集合(補完の誤発火防止 2026-07-06)
         _scope_keys = set()
 
         def add_seq(seq):
@@ -80,7 +81,7 @@ class NewKotsuPlanGenerator:
                     seen.add(sn)
                     order.append(sn)
 
-        def capture(walker):
+        def capture(walker, visited):
             try:
                 sc = dict(walker.hyo._user_inputs)
             except Exception:
@@ -89,10 +90,12 @@ class NewKotsuPlanGenerator:
             if key not in _scope_keys:
                 _scope_keys.add(key)
                 self._branch_scopes.append(sc)
+                self._branch_visited.append(set(visited or ()))
 
         base_w = FlowWalker(self.bj)
-        add_seq(base_w.walk().get('visited_sitsumons', []))
-        capture(base_w)
+        _base_res = base_w.walk()
+        add_seq(_base_res.get('visited_sitsumons', []))
+        capture(base_w, _base_res.get('visited_sitsumons', []))
 
         changed = True
         guard = 0
@@ -111,7 +114,7 @@ class NewKotsuPlanGenerator:
                     res = w.walk()
                     before = len(seen)
                     add_seq(res.get('visited_sitsumons', []))
-                    capture(w)
+                    capture(w, res.get('visited_sitsumons', []))
                     if len(seen) > before:
                         changed = True
         return order
@@ -154,10 +157,18 @@ class NewKotsuPlanGenerator:
                 #   『開く』質問は、ユーザ入力軸として残す (#40 条件選択: 運搬物種別=セメント
                 #   →FG1=8 が Row の範囲外 → 開く)。_opens_on_forced_route は全駆動が
                 #   スコープに直接確定&外部でない&確定Kigouでどの行も選ばない時のみ真(安全側)。
+                #   誤発火防止(2026-07-06 #30 施工歩掛/SBK): スコープは分岐走査の
+                #   「最終スナップショット」であり、その分岐で sn 自体に到達していなければ
+                #   隙間判定は無意味(上書き前の値や別ルートの値を見てしまう)。
+                #   → 同じ分岐で sn に到達している場合のみ補完を認める。
+                _scopes = getattr(self, '_branch_scopes', [])
+                _visits = getattr(self, '_branch_visited', [])
+                if len(_visits) < len(_scopes):
+                    _visits = _visits + [set()] * (len(_scopes) - len(_visits))
                 if (len(self._selectable_rows(sn)) >= 2
                         and name not in _visible_names
-                        and any(auto._opens_on_forced_route(sn, sc)
-                                for sc in getattr(self, '_branch_scopes', []))):
+                        and any(sn in vi and auto._opens_on_forced_route(sn, sc)
+                                for sc, vi in zip(_scopes, _visits))):
                     plan.append([self._next_id(), name, 'vary', sn, name,
                                  '分岐で開く条件 (上流選択で駆動変数が範囲外→開く)', note, ''])
                     continue
