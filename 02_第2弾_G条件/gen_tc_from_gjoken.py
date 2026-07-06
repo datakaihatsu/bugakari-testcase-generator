@@ -225,6 +225,49 @@ def _norm(v):
     return v.replace('\r\n', ' ').strip()
 
 
+def _rename_preserving_newlines(cell, old_norm, new_norm):
+    """セル原文の改行(\r\n)構造を保ちながらラベルを old→new に書き換える。
+    G条件ラベルは改行を空白に正規化しているため、そのまま書き戻すとセルが1行に潰れ、
+    「(※標準)」等の行構造前提のデフォルト行判定が壊れる(例 24 表層)。
+    方法: 正規化ビュー(改行→空白)とセル原文の文字対応表を作り、
+    SequenceMatcher(old→new)の編集をセル原文へ射影する。"""
+    raw = str(cell)
+    # 正規化ビューとインデックス対応 (\r\n(2文字)→' '(1文字))
+    view = []
+    idx = []  # view位置 -> raw開始位置
+    i = 0
+    while i < len(raw):
+        if raw.startswith('\r\n', i):
+            view.append(' ')
+            idx.append(i)
+            i += 2
+        else:
+            view.append(raw[i])
+            idx.append(i)
+            i += 1
+    idx.append(len(raw))
+    view_s = ''.join(view)
+    # 先頭の【..】プレフィックス除去(_normと同じ)分だけオフセット
+    import re as _re
+    m = _re.match(r'^【[^】]*】[\s　]+', view_s)
+    off = m.end() if m else 0
+    if view_s[off:].strip() != old_norm:
+        return new_norm  # 対応が取れない場合は従来どおり
+    base = off + (len(view_s[off:]) - len(view_s[off:].lstrip()))
+    out = raw[:idx[base]]
+    pos = base
+    from difflib import SequenceMatcher
+    for tag, a0, a1, b0, b1 in SequenceMatcher(
+            None, view_s[base:base + len(old_norm)], new_norm).get_opcodes():
+        if tag == 'equal':
+            out += raw[idx[base + a0]:idx[base + a1]]
+        elif tag in ('replace', 'insert'):
+            out += new_norm[b0:b1]
+        # delete は何も足さない
+    out += raw[idx[base + len(old_norm)]:]
+    return out
+
+
 def _edit_sit(data, sit_no, dels, renames, adds):
     """Sitsumon019(sit_no) に選択肢の削除/文字変更/追加を適用。added labels を返す。"""
     applied_adds = []
@@ -250,7 +293,8 @@ def _edit_sit(data, sit_no, dels, renames, adds):
             rids = rows_with(old)
             for c in cells:
                 if c['RowID'] in rids and _norm(c.get('Value')) == old:
-                    c['Value'] = new
+                    c['Value'] = _rename_preserving_newlines(
+                        str(c.get('Value') or ''), old, new)
         for new_lbl, src_lbl in adds:
             src_rids = rows_with(src_lbl)
             if not src_rids:
