@@ -123,16 +123,73 @@ def _compatible(a, b):
     return True
 
 
-def build_g(json_path, out_dir=None, label=None):
-    bj = BugakariJSON(json_path)
+def _promote_reselectable_for_coverage(plan_csv, bj, gen, rows):
+    """G条件網羅性の補完(2026-07-06): 再選択可能なのに auto の質問
+    (例 41 杭体内補強鉄筋計上区分=EK1デフォルト実行) を G条件導出用TCに限り
+    vary 昇格し、非既定選択肢で開く質問(例 10本当り杭体内補強鉄筋数量)を列化する。
+    条件(慎重に限定・07の副作用2種から学習):
+      - 種別=auto のみ (fix昇格は既存G条件の列構成を変えた)
+      - **基準(1行目)TCで値を持つ=到達済みの列のみ** (未到達autoを昇格すると
+        step3の「どのTCでも到達しないvary除去」で列ごと消える。例 07空練りモルタル)
+      - SitsumonKind=19 / 選択可能行>=2 / 全行AutoSelectJokenでない
+    戻り値: 昇格件数。昇格があった場合のみ呼び元で再生成する(2パス)。
+    ※TC生成パイプライン本体(step2/step3)は不変更。gen_gjoken内のみ。"""
+    import csv as _csv
+    import io as _io
+    # 基準行(最初のTC行)で値を持つ質問No集合
+    data = [r for r in rows[1:] if r and r[0].startswith('TC')]
+    axcols = list(getattr(gen, '_axes_columns_out', []))
+    reached = set()
+    if data:
+        base = data[0]
+        for k, ax in enumerate(axcols):
+            ci = 2 + k
+            v = (base[ci] if ci < len(base) else '').strip()
+            if v not in ('', '-'):
+                reached.add(int(ax['SitsumonNo']))
+    txt = None
+    for enc in ('utf-8-sig', 'cp932'):
+        try:
+            txt = open(plan_csv, encoding=enc).read()
+            break
+        except UnicodeDecodeError:
+            continue
+    prows = list(_csv.reader(_io.StringIO(txt)))
+    changed = 0
+    for r in prows[1:]:
+        if len(r) < 6 or r[2] != 'auto':
+            continue
+        try:
+            sit_no = int(r[3])
+        except (ValueError, TypeError):
+            continue
+        if sit_no not in reached:
+            continue
+        sit = bj.sitsumon_by_no.get(sit_no)
+        if not sit or sit.get('SitsumonKind') != 19:
+            continue
+        s019 = _sit019_for(bj, sit_no)
+        if not s019:
+            continue
+        sel = [x for x in s019.get('SitRows', [])
+               if x.get('Visible', True) and not x.get('IsFixed', False)]
+        if len(sel) < 2:
+            continue
+        rowid2tab = {x.get('RowID'): x for x in s019.get('SitTabRows', [])}
+        tabs = [rowid2tab.get(x.get('RowID')) for x in sel]
+        if all(t and t.get('AutoSelectJoken') for t in tabs):
+            continue  # 全行自動選択=ユーザ選択不可 → 昇格しない
+        r[2] = 'vary'
+        r[4] = re.sub(r'\(固定\)$', '', r[4]).strip()
+        r[5] = 'G条件網羅(到達済み再選択可能autoの全選択肢行使)'
+        changed += 1
+    if changed:
+        BugakariJSON.write_csv(prows, plan_csv)
+    return changed
 
-    # --- TC生成(新規工種モード step2+step3) ---
-    work = tempfile.mkdtemp()
-    plan_csv = os.path.join(work, 'plan.csv')
-    run_plan_new(json_path, plan_csv)
-    gen = ColumnTCGenerator(plan_csv, json_path)
-    rows = gen.generate()
 
+def _derive_glist(bj, gen, rows, json_path):
+    """step3出力(rows)からG条件(g_list, notes)を導出する(analyzeの本体)。"""
     # --- 規格名計上のエコー計上変数 ---
     #   列にならない自動確定エコー質問(例: 12 機械区分71=機械質量区分のエコー)が
     #   規格名計上を持つ場合、その計上は「行駆動変数(例 J2)を設定する質問=選択条件」で
@@ -259,12 +316,14 @@ def build_g(json_path, out_dir=None, label=None):
         #   ShortCut継承 / SitTabCols.KikakuKeijoNaiyo)。合格TCの規格名計上列と整合。
         kikaku = (any(gen._has_kikaku_keijo(int(s)) for s in sits)
                   or any(_writes_vars(int(s)) & echo_kikaku_vars for s in sits))
-        g_list.append({'name': name, 'vals': merged, 'opt_labels': opt_labels,
+        g_list.append({'name': name, 'sits': sits, 'vals': merged,
+                       'opt_labels': opt_labels,
                        'label2mk': label2mk, 'disp2label': disp2label, 'numeric': numeric,
                        'kikaku': kikaku})
 
     # --- 分岐の注: 統合列の"-"パターンから導出 ---
     notes = []
+    pend = []
     for xi, gx in enumerate(g_list):
         xvals = []
         for v in gx['vals']:
@@ -283,8 +342,93 @@ def build_g(json_path, out_dir=None, label=None):
                 v_label = gx['disp2label'].get(v, v)
                 mk = gx['label2mk'].get(v_label, '')
                 ylabel = '・'.join(f'G{yi+1}条件「{yn}」' for yi, yn in gated)
-                notes.append(f'G{xi+1}条件「{gx["name"]}」で{mk}「{v_label}」を選択した場合は、'
-                             f'{ylabel} を入力する必要はない。')
+                pos = (gx['opt_labels'].index(v_label)
+                       if v_label in gx['opt_labels'] else -1)
+                pend.append({'xi': xi, 'name': gx['name'], 'mk': mk,
+                             'label': v_label, 'pos': pos, 'ylabel': ylabel})
+
+    # 同一ソース列・同一対象列の注は1行に統合(読みやすさ 2026-07-06 #21要望)
+    #   連番3件以上: ①「A」～③「C」のいずれか / それ以外: ①「A」・②「B」のいずれか
+    used = [False] * len(pend)
+    for i, e in enumerate(pend):
+        if used[i]:
+            continue
+        grp = [e]
+        used[i] = True
+        for j in range(i + 1, len(pend)):
+            if used[j]:
+                continue
+            f = pend[j]
+            if f['xi'] == e['xi'] and f['ylabel'] == e['ylabel']:
+                grp.append(f)
+                used[j] = True
+        if len(grp) == 1:
+            sel = f"{e['mk']}「{e['label']}」を選択した場合は"
+        else:
+            grp.sort(key=lambda g: g['pos'])
+            poss = [g['pos'] for g in grp]
+            contiguous = all(b - a == 1 for a, b in zip(poss, poss[1:])) and -1 not in poss
+            if contiguous and len(grp) >= 3:
+                a, b = grp[0], grp[-1]
+                sel = (f"{a['mk']}「{a['label']}」～{b['mk']}「{b['label']}」の"
+                       f"いずれかを選択した場合は")
+            else:
+                sel = ('・'.join(f"{g['mk']}「{g['label']}」" for g in grp)
+                       + 'のいずれかを選択した場合は')
+        notes.append(f"G{e['xi']+1}条件「{e['name']}」で{sel}、"
+                     f"{e['ylabel']} を入力する必要はない。")
+
+    return g_list, notes
+
+
+def analyze(json_path):
+    """G条件の解析結果を返す(CSV出力なし)。
+
+    Returns: (bj, gen, g_list, notes)
+      g_list[i] = {'name', 'sits', 'vals', 'opt_labels', 'label2mk',
+                   'disp2label', 'numeric', 'kikaku'}
+    ③(G条件→改定後TC生成)等の他スクリプトから列⇔質問No対応を得るための共有API。
+    """
+    bj = BugakariJSON(json_path)
+
+    # --- TC生成(新規工種モード step2+step3) ---
+    work = tempfile.mkdtemp()
+    plan_csv = os.path.join(work, 'plan.csv')
+    run_plan_new(json_path, plan_csv)
+    gen = ColumnTCGenerator(plan_csv, json_path)
+    rows = gen.generate()
+    g_list, notes = _derive_glist(bj, gen, rows, json_path)
+
+    # --- 網羅性補完(2026-07-06・41対応) ---
+    #   到達済み再選択可能autoを昇格して再導出し、「列・選択肢が一切失われない」
+    #   場合のみ採用(増える方向のみ許容)。玉突きで劣化する場合(例 07)は破棄。
+    plan_backup = open(plan_csv, encoding='cp932', errors='replace').read()
+    if _promote_reselectable_for_coverage(plan_csv, bj, gen, rows):
+        gen2 = ColumnTCGenerator(plan_csv, json_path)
+        rows2 = gen2.generate()
+        g2, n2 = _derive_glist(bj, gen2, rows2, json_path)
+        name2opts = {}
+        for g in g2:
+            name2opts.setdefault(g['name'], set()).update(g['opt_labels'])
+        degraded = False
+        for g in g_list:
+            if g['name'] not in name2opts or \
+                    not set(g['opt_labels']) <= name2opts[g['name']]:
+                degraded = True
+                break
+        if degraded:
+            with open(plan_csv, 'w', encoding='cp932', newline='') as f:
+                f.write(plan_backup)
+            print('  [網羅性補完] 列/選択肢の喪失を検知 → 昇格を破棄(元の結果を使用)')
+        else:
+            gen, rows, g_list, notes = gen2, rows2, g2, n2
+
+    gen._rows_cache = rows  # ③(gen_tc_from_gjoken)が基準行の到達系列を知るための添付
+    return bj, gen, g_list, notes
+
+
+def build_g(json_path, out_dir=None, label=None):
+    bj, gen, g_list, notes = analyze(json_path)
 
     # --- CSV 出力 ---
     name, unit = _header(bj)
@@ -314,7 +458,8 @@ def build_g(json_path, out_dir=None, label=None):
         base = os.path.basename(out_dir.rstrip(os.sep))
         label = '叩き台' if '叩き台' in base else ('人作成' if '人作成' in base else '')
     suffix = f'_{label}' if label else ''
-    fname = f'Gaia入力基準表_{name}({unit}){suffix}.csv'
+    safe = re.sub(r'[\\/:*?"<>|]', '_', name).strip()
+    fname = f'Gaia入力基準表_{safe}({unit}){suffix}.csv'
     os.makedirs(out_dir, exist_ok=True)
     out_csv = os.path.join(out_dir, fname)
     BugakariJSON.write_csv(out, out_csv)
