@@ -1,0 +1,5 @@
+軸ID,軸名,種別,SitsumonNo,列ラベル,変更理由,備考,強制行ID
+AX-001,作業区分,fix,1,作業区分,,SitsumonKind=19,
+AX-002,作業内容,vary,2,作業内容,選択肢テキスト変更 / 選択肢削除,SitsumonKind=19,
+AX-003,資材計上区分,vary,8,資材計上区分,業務ルール(G条件ゲート): 資材計上区分の切替が新規条件/計上に影響,SitsumonKind=19,
+AX-004,購入土計上区分,auto,11,購入土計上区分(固定),自動選択(AutoSelectJoken),SitsumonKind=19,
