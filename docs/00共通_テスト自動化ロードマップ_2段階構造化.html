@@ -533,7 +533,7 @@
           <thead>
             <tr>
               <th>段階</th>
-              <th>テストケース作成 1案件あたり<span style="font-weight:400;color:var(--muted)">（重量級・改定1件）</span></th>
+              <th>テストケース作成 1案件あたり<span style="font-weight:400;color:var(--muted)">（重量級・改定1件＝多工種束）</span></th>
               <th>削減率</th>
               <th>歩掛全体の工数減<span style="font-weight:400;color:var(--muted)">（年間・累計）</span></th>
               <th>歩掛全体の生産性</th>
@@ -543,4 +543,90 @@
             <tr class="now">
               <td class="rowlab">現状<span class="mut">手作業</span></td>
               <td class="num">30〜60h</td>
-              <td class=
+              <td class="num">—</td>
+              <td class="num">—</td>
+              <td class="num">1.0倍</td>
+            </tr>
+            <tr class="s1">
+              <td class="rowlab">第1弾<span class="mut">叩き台＋乖離/合否 ・ 完了</span></td>
+              <td class="num big">15〜30h</td>
+              <td class="num">50%</td>
+              <td class="num">−約 1,930 h</td>
+              <td class="num big">約1.15倍</td>
+            </tr>
+            <tr class="s2">
+              <td class="rowlab">第2弾<span class="mut">G条件生成＋TC生成 ・ 着手中</span></td>
+              <td class="num big">6〜12h</td>
+              <td class="num">80%</td>
+              <td class="num">−約 3,090 h</td>
+              <td class="num big">約1.27倍</td>
+            </tr>
+            <tr class="s3">
+              <td class="rowlab">第3弾<span class="mut">合否・回帰の自動化（Gaia不要）・構想</span></td>
+              <td class="num big">5〜10h</td>
+              <td class="num">約83%</td>
+              <td class="num">−約 3,590 h</td>
+              <td class="num big">約1.33倍</td>
+            </tr>
+            <tr class="s4">
+              <td class="rowlab">第4弾<span class="mut">基準から条件を直接生成（構想）</span></td>
+              <td class="num">レビューのみ</td>
+              <td class="num">→100%へ</td>
+              <td class="num">−最大約 3,860 h</td>
+              <td class="num">約1.37倍</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+      <p class="note">
+        この表は本プロジェクト（②③）単独の寄与。<b style="color:var(--ink)">「1案件あたり」＝歩掛改定1件（＝多工種をまとめた束・重量級）のテストケース作成にかかる工数</b>（30〜60h。<b style="color:var(--ink)">単一工種ではなく多工種分の合計</b>で、1工種単位ならRedmine実績で7〜8割が1h以内）。第3弾は、テスト工程（Redmine実績で年 約2,500h・全体の約16%）のうち <b style="color:var(--ink)">〈2名通し ÷2 × シナリオ/単体の半々 ÷2 ＝ 約1/4（≒625h）〉</b> を機械化対象とし、立ち上がりと第2弾との重複を見て控えめに <b style="color:var(--ink)">約500h</b> を上乗せ（第2弾比）＝ 約1.33倍。第4弾まで到達すれば歩掛全体で <b style="color:var(--ink)">約1.37倍</b>。会社目標の生産性200%（≒2倍）は、これに別PJ（①規模感算出）と歩掛データ作成の手戻り削減が積み上がって到達する想定。
+        <br>※ 第3弾の「約1/4」は年約2,500hのテスト工程を四分割した仮説（Redmineは工程内訳を持たず、単体≒(a)計上判定レベルの機械化を前提）。第4弾の「100%」・第2弾の「80%」は到達目標の仮置き。
+      </p>
+    </div>
+  </section>
+
+  <footer>
+    <div class="wrap">
+      <span>歩掛JSONテストケース自動生成エンジン ／ テスト自動化ロードマップ</span>
+      <span class="mono">v1.2 ・ 2026-07-06 ・ 第1弾=完了 / 第2弾=着手中 / 第3弾=構想(合否自動化) / 第4弾=構想 ・ 整理: ②テスト作成 N / ③条件作成 S</span>
+    </div>
+  </footer>
+
+</div>
+
+<script>
+(function(){
+  function draw(){
+    var grid=document.querySelector('.phases');
+    var a=document.getElementById('p2s2'), b=document.getElementById('p4s2');
+    if(!grid||!a||!b) return;
+    var old=document.getElementById('p2p4arrow'); if(old) old.remove();
+    var gr=grid.getBoundingClientRect(), ar=a.getBoundingClientRect(), br=b.getBoundingClientRect();
+    if(br.left <= ar.left+10) return;  /* 縦積み(モバイル/印刷幅)では描かない */
+    var ns='http://www.w3.org/2000/svg';
+    var svg=document.createElementNS(ns,'svg');
+    svg.id='p2p4arrow';
+    svg.setAttribute('style','position:absolute;left:0;top:0;width:100%;height:100%;pointer-events:none;overflow:visible;z-index:3');
+    /* 第2弾②の右端 → 上のレール → 第4弾②の左端。第3弾カードの本文を跨がないよう、
+       縦線はカード間のすき間(gap)に、横線はカード上端より上に通す（直角ブラケット・角丸）。 */
+    var x1=ar.right-gr.left-2,  y1=ar.top-gr.top+ar.height/2;
+    var x2=br.left-gr.left+2,   y2=br.top-gr.top+br.height/2;
+    var xL=x1+7, xR=x2-7, yR=-18;  /* 縦線＝両隣のすき間の中／レール＝カード上端の上 */
+    var defs=document.createElementNS(ns,'defs');
+    defs.innerHTML='<marker id="p2p4head" markerWidth="7" markerHeight="7" refX="5.2" refY="3.5" orient="auto"><path d="M0,0 L6,3.5 L0,7 Z" fill="#1E5AA8"/></marker>';
+    svg.appendChild(defs);
+    var path=document.createElementNS(ns,'path');
+    path.setAttribute('d','M'+x1+','+y1+' L'+xL+','+y1+' L'+xL+','+yR+' L'+xR+','+yR+' L'+xR+','+y2+' L'+x2+','+y2);
+    path.setAttribute('fill','none');
+    path.setAttribute('stroke','#1E5AA8');
+    path.setAttribute('stroke-width','1.8');
+    path.setAttribute('stroke-linejoin','round');
+    path.setAttribute('stroke-linecap','round');
+    path.setAttribute('marker-end','url(#p2p4head)');
+    svg.appendChild(path);
+    grid.appendChild(svg);
+  }
+  window.addEventListener('load',draw);
+  window.addEventListener('resize',draw);
+})();
+</script>
