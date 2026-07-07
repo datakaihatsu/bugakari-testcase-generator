@@ -1,0 +1,67 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Gaia歩掛 テストケース生成ツール</title>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+  <header>
+    <h1>Gaia歩掛 テストケース生成ツール</h1>
+    <div id="cfgbar" class="cfgbar">格納場所を読込中…</div>
+  </header>
+
+  <nav class="tabs">
+    <button class="tab active" data-tab="t1">① G条件生成</button>
+    <button class="tab" data-tab="t3">③ テストケース生成</button>
+  </nav>
+
+  <!-- ① G条件生成 -->
+  <section id="t1" class="panel active">
+    <div class="card">
+      <h2>① 歩掛JSONから G条件（商品）を生成</h2>
+      <label>Gaia9キー または 歩掛キー
+        <span class="hint">例: 65-14-160-20350 / 14-160-20350 / 160-1351</span>
+      </label>
+      <div class="row">
+        <input id="keyInput" type="text" placeholder="キーを入力" autocomplete="off">
+        <button id="btnLocate">検索</button>
+      </div>
+      <div id="locateResult" class="result"></div>
+      <div class="row">
+        <button id="btnGenG" disabled>G条件を生成（商品）</button>
+      </div>
+      <div id="genGResult" class="result"></div>
+    </div>
+  </section>
+
+  <!-- ③ テストケース生成 -->
+  <section id="t3" class="panel">
+    <div class="card">
+      <h2>③ 商品＋改修後 G条件から 改定後テストケースを生成</h2>
+
+      <fieldset>
+        <legend>枠A: 商品G条件（改定前）</legend>
+        <div id="handoffBox" class="handoff"></div>
+        <label class="radio"><input type="radio" name="g20mode" value="session" checked> ①の結果を引き継ぐ</label>
+        <label class="radio"><input type="radio" name="g20mode" value="upload"> ファイルを選ぶ（.xlsx）</label>
+        <input id="g20File" type="file" accept=".xlsx,.csv" disabled>
+      </fieldset>
+
+      <fieldset>
+        <legend>枠B: 改修後G条件（人が編集したもの・.xlsx）</legend>
+        <input id="g30File" type="file" accept=".xlsx,.csv">
+      </fieldset>
+
+      <div class="row">
+        <button id="btnGenTC">テストケースを生成</button>
+        <span id="tcSpinner" class="spinner hidden">生成中… (工種により数十秒)</span>
+      </div>
+      <div id="genTCResult" class="result"></div>
+    </div>
+  </section>
+
+  <script src="/static/app.js"></script>
+</body>
+</html>

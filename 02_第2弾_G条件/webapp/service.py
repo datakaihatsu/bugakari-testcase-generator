@@ -93,6 +93,13 @@ def _to_csv(path, workdir, name):
     return path  # 既にCSV（テスト・内部利用）
 
 
+def _apply_ymd(json_path):
+    """歩掛JSONファイル名 <key>.<年度>.<適用年月日>.json から適用年月日を取り出す。無ければ''。"""
+    import re
+    m = re.fullmatch(r'.+\.(\d+)\.(\d+)\.json', os.path.basename(json_path))
+    return m.group(2) if m else ''
+
+
 def _note_count(matrix):
     nb = io_xlsx._note_boundary(matrix)
     if nb >= len(matrix):
@@ -130,7 +137,11 @@ def gen_g(json_path, cfg=None, out_dir=None):
         out['csv_path'] = csv_path
         out['log'] = log
         base = os.path.splitext(os.path.basename(csv_path))[0]
-        xlsx = os.path.join(wd, '商品_%s.xlsx' % base)  # 運用者向け名称=商品
+        # 版によって出力が変わるため、適用日をファイル名に付ける（同名衝突・混同を防ぐ）
+        ymd = _apply_ymd(json_path)
+        out['apply_ymd'] = ymd
+        suffix = '_適用%s' % ymd if ymd else ''
+        xlsx = os.path.join(wd, '商品_%s%s.xlsx' % (base, suffix))  # 運用者向け名称=商品
         io_xlsx.csv_to_xlsx(csv_path, xlsx)
         out['xlsx_path'] = xlsx
         matrix, _ = io_xlsx.read_csv_matrix(csv_path)

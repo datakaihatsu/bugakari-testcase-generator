@@ -127,6 +127,7 @@ def matrix_to_xlsx(matrix, xlsx_path, sheet_title='Sheet1',
     ws = wb.active
     ws.title = (sheet_title or 'Sheet1')[:31]  # Excelのシート名31文字制限
     wrap = Alignment(wrap_text=True, vertical='top')
+    topalign = Alignment(vertical='top')  # 非折返しセルもExcel既定(下揃え)でなく上揃えに統一
 
     note_row = _note_boundary(matrix)  # この行index(0始まり)以降は幅算出・wrap対象から除外
     col_maxline = {}       # 列 -> 最大単一行表示幅（(注)より上）
@@ -140,14 +141,13 @@ def matrix_to_xlsx(matrix, xlsx_path, sheet_title='Sheet1',
             cell = ws.cell(row=r, column=c, value=s)
             cell.number_format = '@'  # 数値/日付への誤変換防止
             has_nl = ('\n' in s or '\r' in s)
+            cell.alignment = wrap if has_nl else topalign  # 全セル上揃え（既定の下揃えを回避）
             if (r - 1) < note_row:
                 longest = max((_disp_width(x) for x in s.splitlines()), default=_disp_width(s))
                 col_maxline[c] = max(col_maxline.get(c, 0), longest)
                 if has_nl or longest > WRAP_COL_WIDTH:
                     col_is_long[c] = True
                 cells_above.setdefault(c, []).append(cell)
-            elif has_nl:
-                cell.alignment = wrap  # (注)行に改行があれば折り返し（通常は単一行=オーバーフロー）
 
     # 長文列は幅を WRAP_COL_WIDTH で頭打ちにし列全体を折り返す（横に広げず縦に折る）。
     # それ以外は内容幅にフィット（単一行上限 MAX_COL_WIDTH）。
