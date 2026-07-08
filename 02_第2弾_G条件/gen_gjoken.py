@@ -42,6 +42,13 @@ def _mk(oi):
     return chr(9312 + oi) if oi < 20 else f'({oi + 1})'
 
 
+def _strip_code(v):
+    """表示文字列の先頭 Gaia入力条件コード(【A=1】等)を除去。内部の統合/注記判定は
+    コード非依存で行う(TC側=generate_csv がコードを併記表示するようになったため、
+    ここで剥がして従来の識別ロジックを保つ。2026-07-08)。"""
+    return re.sub(r'^【[^】]*】[\s　]+', '', str(v or '')).strip()
+
+
 def _header(bj):
     daika = (bj.data.get('Daika') or [{}])[0]
     return (daika.get('DaikaTitle') or daika.get('Mesho') or ''), (daika.get('AtariTani') or '')
@@ -230,7 +237,7 @@ def _derive_glist(bj, gen, rows, json_path):
         ci = 2 + k
         sit = int(ax['SitsumonNo'])
         name = re.sub(r'\(固定\)$', '', (ax.get('列ラベル') or ax.get('軸名') or '')).strip()
-        vals = [(r[ci] if ci < len(r) else '').strip() for r in data]
+        vals = [_strip_code(r[ci] if ci < len(r) else '') for r in data]
         raw.append({'sit': sit, 'canon': _canon_no(bj, sit), 'name': name, 'vals': vals})
 
     # --- 同名重複列の統合(質問No.キー) ---
@@ -312,7 +319,7 @@ def _derive_glist(bj, gen, rows, json_path):
             except Exception:
                 tc_rows = []
             for r in tc_rows:
-                d = str(r.get('display', '')).strip()
+                d = _strip_code(r.get('display', ''))
                 rid = r.get('row_id')
                 if d and rid in rid2label and d not in disp2label:
                     disp2label[d] = rid2label[rid]

@@ -199,7 +199,7 @@ class ColumnTCGenerator:
             row_id = sr.get('RowID')
             if not sr.get('Visible', True) or sr.get('IsFixed', False):
                 continue
-            text_display = self._strip_ref_code(cells.get((row_id, disp_col), '').replace('\r\n', ' ').strip()) if disp_col else f'Row{row_id}'
+            text_display = cells.get((row_id, disp_col), '').replace('\r\n', ' ').strip() if disp_col else f'Row{row_id}'
             # J4: 規格コード列の併記
             if value_col is not None:
                 value_part = str(cells.get((row_id, value_col), '')).strip()
@@ -225,17 +225,9 @@ class ColumnTCGenerator:
             })
         return result
 
-    # タブセルの選択肢文字列には編集用の参照コード注記 (例「【A=1】\r\n土留無」)
-    # が前置されることがある。これは内部メタ情報であり選択肢名ではないため除去する。
-    #   - 【…】 で始まり、直後に改行/空白が続くものを 1 個だけ剥がす。
-    #   - 注記の後ろに実体ラベル (土留無 等) が残る場合のみ剥がす (注記単独なら維持)。
-    _REF_CODE_RE = re.compile(r'^【[^】]*】[\s　]+(?=\S)')
-
-    @classmethod
-    def _strip_ref_code(cls, text):
-        if not text:
-            return text
-        return cls._REF_CODE_RE.sub('', str(text))
+    # タブセルの選択肢文字列に前置される Gaia入力条件コード (例「【A=1】\r\n土留無」) は、
+    # 運用者が Gaia 上で選ぶ J条件コードであり、TC にも併記する
+    #   (2026-07-08 運用者フィードバック: G条件の選択肢表記と統一)。→ 除去しない。
 
     def _option_texts(self, bj, sit_no):
         """質問の選択肢表示テキスト集合 (タブなしセル基準)。"""
@@ -288,7 +280,7 @@ class ColumnTCGenerator:
             return row['display']
         rid = row['row_id']
         text = self.new_json.cell_value_for_tab(sit019, rid, disp_col, active_tab)
-        text_display = self._strip_ref_code(str(text).replace('\r\n', ' ').strip()) if text else ''
+        text_display = str(text).replace('\r\n', ' ').strip() if text else ''
         value_col = row.get('value_col')
         if value_col is not None:
             vp = self.new_json.cell_value_for_tab(sit019, rid, value_col, active_tab)
