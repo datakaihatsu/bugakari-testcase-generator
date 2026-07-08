@@ -239,6 +239,14 @@ def diff_gjoken(g20, g30):
     return {'col_map': col_map, 'new_cols': new_cols, 'choice_diffs': choice_diffs}
 
 
+def _note_key(g, nt):
+    """注(ゲート)を名前ベースの正規化キーにする(20/30間の突合用)。"""
+    cols = g.get('cols', [])
+    tnames = tuple(sorted(cols[t]['name'] for t in nt.get('targets', [])
+                          if 0 <= t < len(cols)))
+    return (nt.get('src_name', ''), nt.get('src_choice', ''), tnames)
+
+
 # ------------------------------------------------------------------
 # 擬似改定後JSON 合成 (選択肢の削除・文字変更・追加を改定前JSONへ適用)
 # ------------------------------------------------------------------
@@ -505,6 +513,7 @@ DAIKA_COL = '代価表行と数量(数率)'
 DAIKA_TEXT = ('積算基準および設計書通りの代価行と数量が計上されていること\n'
               '※ただし計上区分の切り替えによる代価行変動がある場合は、設計者が追記すること')
 DAIKA_DITTO = '〃'
+REGRESSION_KANTEN = '・選択肢が商品(現行版)と変わっていないこと'  # 回帰行の標準観点(step3と同一)
 
 
 def _axis_span(header):
@@ -837,6 +846,286 @@ def apply_g30_codes(rows, g30):
     return rows
 
 
+_LEAD_COLS = ('テストID', 'テスト区分')
+_TAIL_COLS = (DAIKA_COL, '選択肢の適切さ確認', '規格名計上')
+
+
+def add_gate_branch_rows(rows, g20, g30):
+    """改定で(注)=ゲートが新設/変更された源泉条件について、ゲートの両側
+    (効く側=改定で入力不要になる/効かない側=入力対象のまま)を通す行を足す
+    (2026-07-08 運用者フィードバック: 前方選択で後方挙動が変わる→両側テストが妥当)。
+
+    ★爆発回避: vary昇格(全展開・直積)はしない。回帰行(先頭TC)を土台に、当該
+    源泉条件“だけ”を効く側/効かない側の代表choiceへ切り替えた行を複製追加する
+    (他条件は据え置き)。既に在る側は足さない(＝+1行/ゲート程度に厳選)。
+    ※apply_g30_gating の前に呼ぶ(効かない側の複製に対象列の非ゲート値を残すため)。"""
+    if not rows:
+        return rows
+    header = rows[0]
+    data = [r for r in rows[1:] if r and str(r[0]).startswith('TC')]
+    if not data:
+        return rows
+    cols = g30.get('cols', [])
+    s20 = {_note_key(g20, nt) for nt in g20.get('notes', [])}
+    changed = [nt for nt in g30.get('notes', []) if _note_key(g30, nt) not in s20]
+    if not changed:
+        return rows
+
+    def hidx(name):
+        for i, h in enumerate(header):
+            if re.sub(r'\(固定\)$', '', str(h)) == name:
+                return i
+        return None
+    from collections import defaultdict
+    src2gc = defaultdict(set)
+    gate_effects = []   # (si, src_name, choice, [target_names])
+    for nt in changed:
+        sg = nt.get('src_g')
+        if sg is None or not (0 <= sg < len(cols)):
+            continue
+        src2gc[sg].add(nt.get('src_choice'))
+        si0 = hidx(cols[sg].get('name', ''))
+        if si0 is not None:
+            tnames = [cols[t].get('name', '') for t in nt.get('targets', [])
+                      if 0 <= t < len(cols)]
+            gate_effects.append((si0, cols[sg].get('name', ''),
+                                 nt.get('src_choice'), tnames))
+    try:
+        ti = header.index('テスト区分')
+    except ValueError:
+        ti = 1
+    ki = header.index('選択肢の適切さ確認') if '選択肢の適切さ確認' in header else None
+    di = header.index(DAIKA_COL) if DAIKA_COL in header else None  # 代価表行と数量(数率)
+
+    def gate_kanten(row):
+        """行が踏む「変わったゲート」の差分観点(効かない側なら空文字)。"""
+        parts = []
+        for si0, src, choice, tnames in gate_effects:
+            if si0 < len(row) and _norm(row[si0]) == choice and tnames:
+                tstr = '・'.join(f'「{t}」' for t in tnames)
+                parts.append(f'・改定により「{src}」で「{choice}」選択時は '
+                             f'{tstr} が入力対象外(不要)になっていること')
+        return '\n'.join(parts)
+
+    template = list(data[0])   # 回帰行を土台
+    added = []
+    for sg, gchoices in src2gc.items():
+        col = cols[sg]
+        si = hidx(col.get('name', ''))
+        if si is None:
+            continue
+        opts = col.get('opts', [])
+        raws = col.get('opts_raw', opts)
+        firing = [o for o in opts if o in gchoices]
+        offs = [o for o in opts if o not in gchoices]
+        want = ([firing[0]] if firing else []) + ([offs[0]] if offs else [])
+        present = {_norm(r[si]) for r in (data + added) if si < len(r)}
+        for ch in want:
+            if ch in present:
+                continue
+            raw = raws[opts.index(ch)] if ch in opts else ch
+            nr = list(template)
+            while len(nr) <= max(si, ti):
+                nr.append('')
+            nr[si] = raw
+            is_firing = ch in gchoices
+            nr[ti] = '差分' if is_firing else '回帰'
+            if ki is not None and ki < len(nr):
+                nr[ki] = gate_kanten(nr) if is_firing else REGRESSION_KANTEN
+            if di is not None and di < len(nr):
+                nr[di] = DAIKA_DITTO   # 追加行(2行目以降)は「〃」
+            added.append(nr)
+            present.add(ch)
+    if not added:
+        return rows
+    out = [header] + data + added
+    # 既存行の再割当: 変わったゲートを踏む(効く側)行は 差分＋ゲート改定観点。
+    #   効かない既存行はタグ・観点を維持(choice差分等を降格しない)。
+    for r in data:
+        kant = gate_kanten(r)
+        if not kant:
+            continue
+        r[ti] = '差分'
+        if ki is not None and ki < len(r):
+            cur = str(r[ki]).strip()
+            if not cur or cur.startswith('・選択肢が商品'):
+                r[ki] = kant
+            elif kant not in cur:
+                r[ki] = cur + '\n' + kant
+    for i, r in enumerate(out[1:], 1):   # テストID再採番
+        if r:
+            r[0] = f'TC-{i:03d}'
+    return out
+
+
+def reconcile_columns_with_g30(rows, g30):
+    """改修後G条件(30)にあってTCに無い条件列を補う(2026-07-08 運用者フィードバック:
+    TCの条件列は改修後G条件を正とし、(注)で不要な行だけ「-」)。
+
+    ③は「改定前JSON＋差分」の合成でTCを作るため、フロー改定で“改修後は開くが
+    商品フローでは開かなかった列”(例: 発注者仕様ポールでの灯柱列)が欠落する。
+    30 を正として欠落列を追加する。値: 30の(注)でその行が不要になるなら「-」、
+    それ以外は 数値列=「任意」/選択列=既定choice(先頭・改修後コード付き)。
+    列位置は後段 reorder_by_g30 が 30 の順へ整える(ここでは末尾に足す)。"""
+    if not rows:
+        return rows
+    header = rows[0]
+    cols = g30.get('cols', [])
+    notes = g30.get('notes', [])
+    if not cols:
+        return rows
+
+    def norm_hdr(h):
+        return re.sub(r'\(固定\)$', '', str(h))
+    name2i = {}
+    for i, h in enumerate(header):
+        name2i.setdefault(norm_hdr(h), i)
+    present = set(name2i)
+    missing = [c for c in cols if c.get('name') and c['name'] not in present]
+    if not missing:
+        return rows
+
+    def gated_for_row(r, colname):
+        for nt in notes:
+            tnames = [cols[t]['name'] for t in nt.get('targets', []) if 0 <= t < len(cols)]
+            if colname not in tnames:
+                continue
+            sg = nt.get('src_g')
+            if sg is None or not (0 <= sg < len(cols)):
+                continue
+            si = name2i.get(cols[sg]['name'])
+            if si is not None and si < len(r) and _norm(r[si]) == nt.get('src_choice'):
+                return True
+        return False
+    for c in missing:
+        nm = c['name']
+        raws = c.get('opts_raw') or c.get('opts') or []
+        default = '任意' if c.get('numeric') else (raws[0] if raws else '任意')
+        header.append(nm)
+        for r in rows[1:]:
+            while len(r) < len(header) - 1:
+                r.append('')
+            if r and str(r[0]).startswith('TC'):
+                r.append('-' if gated_for_row(r, nm) else default)
+            else:
+                r.append('')
+    return rows
+
+
+def apply_g30_gating(rows, g30):
+    """改定後TCに、改修後G条件(30)の注(分岐ゲート)を適用する
+    (2026-07-08 運用者フィードバック)。
+
+    ③は「改定前JSON＋差分」の合成でTCを作るため、改定で新設された分岐
+    (例: 区分「25m以下」を選ぶと「補修延べ延長」は入力不要)が反映されず、
+    30 の注では不要な条件列にTCが値を出してしまう。ここで 30 の各注
+    (src列で src_choice を選んだら targets列は不要) を各TC行に適用し、
+    条件成立時の対象列セルを「-」(不要)にする。列は名前で対応付ける。"""
+    if not rows:
+        return rows
+    header = rows[0]
+    cols = g30.get('cols', [])
+    notes = g30.get('notes', [])
+    if not notes or not cols:
+        return rows
+
+    def hidx(name):   # G条件列名 → TCヘッダー位置 (「(固定)」を無視)
+        for i, h in enumerate(header):
+            if re.sub(r'\(固定\)$', '', str(h)) == name:
+                return i
+        return None
+    for row in rows[1:]:
+        if not row or not str(row[0]).startswith('TC'):
+            continue
+        for nt in notes:
+            sg = nt.get('src_g')
+            if sg is None or not (0 <= sg < len(cols)):
+                continue
+            si = hidx(cols[sg].get('name', ''))
+            if si is None or si >= len(row):
+                continue
+            if _norm(row[si]) != nt.get('src_choice'):
+                continue
+            for tg in nt.get('targets', []):
+                if not (0 <= tg < len(cols)):
+                    continue
+                ti = hidx(cols[tg].get('name', ''))
+                if ti is not None and ti < len(row):
+                    row[ti] = '-'
+    return rows
+
+
+def drop_unused_condition_columns(rows):
+    """全TC行で「-」/空になった条件列を丸ごと落とす(2026-07-08 運用者フィードバック)。
+    改修後ゲート適用で、どのテスト行でも使われなくなった条件列(特に1行TCで列全体が
+    「-」)を除去する。エンジンの「どのルートでも開かない列は出さない」方針と整合。
+    一部行のみ「-」(=他行で使う)列は従来どおり残す。先頭/末尾の固定列は対象外。"""
+    if not rows:
+        return rows
+    header = rows[0]
+    meta = set(_LEAD_COLS) | set(_TAIL_COLS)
+    data = [r for r in rows[1:] if r and str(r[0]).startswith('TC')]
+    if not data:
+        return rows
+    drop = set()
+    for i, h in enumerate(header):
+        if h in meta or str(h).startswith('期待:'):
+            continue
+        vals = [(r[i] if i < len(r) else '').strip() for r in data]
+        if all(v in ('', '-') for v in vals):
+            drop.add(i)
+    if not drop:
+        return rows
+    keep = [i for i in range(len(header)) if i not in drop]
+    return [[r[i] if i < len(r) else '' for i in keep] for r in rows]
+
+
+def reorder_by_g30(rows, g30):
+    """改定後TCの条件列の並びを、改修後G条件(30)の列順に揃える
+    (2026-07-08 運用者フィードバック: G条件とTCの条件順は一致すべき)。
+
+    ③は「改定前JSON＋差分」の合成でTCを作るため、条件列の並びは改定前のフロー順に
+    従う。改定で質問順が変わった工種では 30(改修後G条件)とTCで列順が食い違う
+    (照合は列名ベースで正しいが、見比べたとき紛らわしい)。ここで最終出力の条件列を
+    30 の列順へ並べ替える(内容は不変・並べ替えのみ)。30 に無い条件列(改定前のみ等)は
+    30 一致列の後ろへ元の相対順で残す。先頭(テストID/テスト区分)・末尾(代価表行と数量/
+    選択肢の適切さ確認/規格名計上)の固定列は位置を保つ。"""
+    if not rows:
+        return rows
+    header = rows[0]
+    meta = set(_LEAD_COLS) | set(_TAIL_COLS)
+    def _match(h):
+        # TC側は auto/fix軸に「(固定)」を付ける。G条件(30)は素の名前なので剥がして照合。
+        return re.sub(r'\(固定\)$', '', str(h))
+    # G条件(30)の列名→出現位置リスト(同名重複に対応)。
+    from collections import defaultdict
+    g30occ = defaultdict(list)
+    for i, c in enumerate(g30.get('cols', [])):
+        g30occ[c.get('name', '')].append(i)
+    lead_idx = [i for i, h in enumerate(header) if h in _LEAD_COLS]
+    tail_idx = [i for i, h in enumerate(header) if h in _TAIL_COLS]
+    exp_idx = [i for i, h in enumerate(header) if str(h).startswith('期待:')]
+    cond_idx = [i for i, h in enumerate(header)
+                if h not in meta and not str(h).startswith('期待:')]
+    # 同名は「TCの元の並び順」に g30 の出現位置を順に割り当てる(貪欲)。
+    #   30に無い/出現数超過の列は末尾へ(元の相対順を保持)。
+    used = defaultdict(int)
+    posof = {}
+    for i in cond_idx:
+        nm = _match(header[i]); q = g30occ.get(nm)
+        if q and used[nm] < len(q):
+            posof[i] = q[used[nm]]; used[nm] += 1
+        else:
+            posof[i] = 10 ** 6
+    cond_sorted = sorted(cond_idx, key=lambda i: (posof[i], i))
+    new_order = lead_idx + cond_sorted + exp_idx + tail_idx
+    seen = set(new_order)
+    for i in range(len(header)):   # 取りこぼし防止(全列を1回ずつ)
+        if i not in seen:
+            new_order.append(i)
+    return [[r[i] if i < len(r) else '' for i in new_order] for r in rows]
+
+
 def replace_expected_columns(rows):
     """「期待:変数」列を全廃し、同位置に「代価表行と数量(数率)」列を1本置く。
     1行目=定型文(積算基準および設計書通り…+※計上区分切替の追記依頼)、2行目以降=「〃」。
@@ -958,6 +1247,11 @@ def run(csv20, csv30, old_json, out_dir=None):
     out = replace_expected_columns(out)
     out = fix_kanten_wording(out)
     out = apply_g30_codes(out, g30)
+    out = add_gate_branch_rows(out, g20, g30)
+    out = apply_g30_gating(out, g30)
+    out = reconcile_columns_with_g30(out, g30)
+    out = drop_unused_condition_columns(out)
+    out = reorder_by_g30(out, g30)
     BugakariJSON.write_csv(out, s3)
     n = len(out) - 1
     print(f'③改定後TC叩き台 生成完了: {s3}  (TC {n}件 / 列 {len(out[0])})')
