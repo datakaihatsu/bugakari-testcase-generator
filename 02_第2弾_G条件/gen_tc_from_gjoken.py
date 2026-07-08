@@ -61,19 +61,22 @@ def _read_csv_any(path):
     raise RuntimeError(f'エンコーディング判別不可: {path}')
 
 
+def _strip_circled(s):
+    """選択肢セルの ①..⑳ / (21) マーカーのみ除去(Gaiaコード【】は残す=表示用)。"""
+    s = s.strip()
+    if s and 0x2460 <= ord(s[0]) <= 0x2473:
+        return s[1:].strip()
+    m = re.match(r'^\((\d+)\)\s*(.+)$', s)
+    if m:
+        return m.group(2).strip()
+    return s
+
+
 def _strip_marker(s):
     """選択肢セルの ①..⑳ / (21) マーカーを除去し、続けて表示併記された
     Gaia入力条件コード(【A=1】等)も内部識別子から除去する。
     → ①(gen_gjoken)がコードを表示併記しても、③の突合キーは従来どおり(不変)。"""
-    s = s.strip()
-    if s and 0x2460 <= ord(s[0]) <= 0x2473:
-        s = s[1:].strip()
-    else:
-        m = re.match(r'^\((\d+)\)\s*(.+)$', s)
-        if m:
-            s = m.group(2).strip()
-    s = re.sub(r'^【[^】]*】[\s　]+', '', s)
-    return s.strip()
+    return re.sub(r'^【[^】]*】[\s　]+', '', _strip_circled(s)).strip()
 
 
 def read_gjoken(path):
@@ -101,7 +104,7 @@ def read_gjoken(path):
             continue
         if head == '施工区分/入力条件':
             n = len(row) - 1
-            cols = [{'name': '', 'opts': [], 'numeric': False, 'kikaku': False}
+            cols = [{'name': '', 'opts': [], 'opts_raw': [], 'numeric': False, 'kikaku': False}
                     for _ in range(n)]
             continue
         if head == '規格名計上':
@@ -121,8 +124,10 @@ def read_gjoken(path):
                 if c.startswith('(実数入力)') or (cols[i]['numeric'] and re.match(r'^\(.*\)$', c)):
                     cols[i]['numeric'] = True
                     cols[i]['opts'].append(c)
+                    cols[i]['opts_raw'].append(c)
                 else:
-                    cols[i]['opts'].append(_strip_marker(c))
+                    cols[i]['opts'].append(_strip_marker(c))      # 突合キー(コード除去)
+                    cols[i]['opts_raw'].append(_strip_circled(c))  # 表示用(改修後コード保持)
     # 注のパース: 「Gx条件「名」で◯「選択肢」を選択した場合は、Gy条件「名」・… を入力する必要はない。」
     #   統合形式(2026-07-06 #21要望)にも対応:
     #     ①「A」・②「B」のいずれかを選択した場合は… / ①「A」～③「C」のいずれかを選択した場合は…
@@ -801,6 +806,37 @@ def fix_kanten_wording(rows):
     return rows
 
 
+def apply_g30_codes(rows, g30):
+    """改定後TCの選択肢セルを、改修後G条件(30)の生ラベル(改修後Gaiaコード付き)へ
+    貼り替える。③は「改定前JSON＋差分」の合成でTCを作るため、コードだけが変わった
+    (例 【H=1】→【G=1】)選択肢は差分に乗らず改定前コードが残ってしまう。ここで
+    列見出し一致＋ラベル(コード除去)一致により 30 側の改修後コードへ揃える
+    (2026-07-08 運用者フィードバック)。数値/任意や一致先なしのセルは据え置き。
+    改修後にコードが無い工種は name2map が空になり no-op(=従来出力を維持)。"""
+    if not rows:
+        return rows
+    header = rows[0]
+    name2map = {}
+    for c in g30.get('cols', []):
+        m = {lbl: raw for lbl, raw in zip(c.get('opts', []), c.get('opts_raw', []))
+             if raw and raw != lbl}
+        if m:
+            name2map[c.get('name', '')] = m
+    if not name2map:
+        return rows
+    for row in rows[1:]:
+        if not row or not str(row[0]).startswith('TC'):
+            continue
+        for i, h in enumerate(header):
+            mp = name2map.get(h)
+            if not mp or i >= len(row):
+                continue
+            key = _norm(row[i])
+            if key in mp:
+                row[i] = mp[key]
+    return rows
+
+
 def replace_expected_columns(rows):
     """「期待:変数」列を全廃し、同位置に「代価表行と数量(数率)」列を1本置く。
     1行目=定型文(積算基準および設計書通り…+※計上区分切替の追記依頼)、2行目以降=「〃」。
@@ -921,6 +957,7 @@ def run(csv20, csv30, old_json, out_dir=None):
     out = reopen_added_choice_rows(out, g20, g30, diffs)
     out = replace_expected_columns(out)
     out = fix_kanten_wording(out)
+    out = apply_g30_codes(out, g30)
     BugakariJSON.write_csv(out, s3)
     n = len(out) - 1
     print(f'③改定後TC叩き台 生成完了: {s3}  (TC {n}件 / 列 {len(out[0])})')
