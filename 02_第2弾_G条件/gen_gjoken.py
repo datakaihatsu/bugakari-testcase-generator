@@ -107,9 +107,12 @@ def _g_options(bj, sit_no):
         return []
     out = []
     for r in sel:
-        v = str(cells.get((r, best_col), '') or '').strip()
-        v = re.sub(r'^【[^】]*】[\s　]+', '', v).replace('\r\n', ' ').strip()
-        out.append((r, v or f'Row{r}'))
+        raw = str(cells.get((r, best_col), '') or '').strip()
+        raw = raw.replace('\r\n', ' ').strip()
+        # raw = 表示用(元のまま。Gaia入力条件コード【A=1】等を残す)
+        # v   = 内部識別子(コード除去。畳み込み/突合キーは従来どおり)
+        v = re.sub(r'^【[^】]*】[\s　]+', '', raw).strip()
+        out.append((r, v or f'Row{r}', raw or f'Row{r}'))
     return out
 
 
@@ -272,17 +275,18 @@ def _derive_glist(bj, gen, rows, json_path):
         opts = []
         seen_lbl = set()
         for sit in sits:
-            for rid, lbl in _g_options(bj, sit):
+            for rid, lbl, rawlbl in _g_options(bj, sit):
                 if lbl in seen_lbl:
                     continue
                 seen_lbl.add(lbl)
-                opts.append((sit, rid, lbl))
+                opts.append((sit, rid, lbl, rawlbl))
         if not opts:
             for v in merged:
                 if v not in ('', '-') and v not in seen_lbl:
                     seen_lbl.add(v)
-                    opts.append((None, None, v))
-        opt_labels = [lbl for _, _, lbl in opts]
+                    opts.append((None, None, v, v))
+        opt_labels = [lbl for _, _, lbl, _ in opts]
+        opt_raws = [rl for _, _, _, rl in opts]  # 表示用(コード併記)。内部はopt_labels
         # 数量を直接入力する質問(Kind17)は「任意」ではなく「(実数入力)」＋「(単位)」で表示。
         #   単位は Sitsumon017.TaniMesho。選択肢番号(①②)は付けない。
         numeric = any((bj.sitsumon_by_no.get(s, {}) or {}).get('SitsumonKind') == 17
@@ -297,11 +301,12 @@ def _derive_glist(bj, gen, rows, json_path):
                 if unit:
                     break
             opt_labels = ['(実数入力)'] + ([f'({unit})'] if unit else [])
+            opt_raws = list(opt_labels)  # 数量入力はコード併記なし
         label2mk = {lbl: _mk(i) for i, lbl in enumerate(opt_labels)}
         # TC表示値 -> 説明ラベル(row_id経由・Sitごと)。注のラベル/番号を表と一致。
         disp2label = {}
         for sit in sits:
-            rid2label = {rid: lbl for s, rid, lbl in opts if s == sit}
+            rid2label = {rid: lbl for s, rid, lbl, _ in opts if s == sit}
             try:
                 tc_rows = gen._get_axis_rows(sit)
             except Exception:
@@ -317,7 +322,7 @@ def _derive_glist(bj, gen, rows, json_path):
         kikaku = (any(gen._has_kikaku_keijo(int(s)) for s in sits)
                   or any(_writes_vars(int(s)) & echo_kikaku_vars for s in sits))
         g_list.append({'name': name, 'sits': sits, 'vals': merged,
-                       'opt_labels': opt_labels,
+                       'opt_labels': opt_labels, 'opt_raws': opt_raws,
                        'label2mk': label2mk, 'disp2label': disp2label, 'numeric': numeric,
                        'kikaku': kikaku})
 
@@ -442,7 +447,7 @@ def build_g(json_path, out_dir=None, label=None):
         row = ['']
         for g in g_list:
             if oi < len(g['opt_labels']):
-                cell = g['opt_labels'][oi]
+                cell = g.get('opt_raws', g['opt_labels'])[oi]  # 表示はコード併記(元のまま)
                 row.append(cell if g.get('numeric') else f'{_mk(oi)}{cell}')
             else:
                 row.append('')

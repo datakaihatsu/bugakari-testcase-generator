@@ -62,14 +62,18 @@ def _read_csv_any(path):
 
 
 def _strip_marker(s):
-    """選択肢セルの ①..⑳ / (21) マーカーを除去。"""
+    """選択肢セルの ①..⑳ / (21) マーカーを除去し、続けて表示併記された
+    Gaia入力条件コード(【A=1】等)も内部識別子から除去する。
+    → ①(gen_gjoken)がコードを表示併記しても、③の突合キーは従来どおり(不変)。"""
     s = s.strip()
     if s and 0x2460 <= ord(s[0]) <= 0x2473:
-        return s[1:].strip()
-    m = re.match(r'^\((\d+)\)\s*(.+)$', s)
-    if m:
-        return m.group(2).strip()
-    return s
+        s = s[1:].strip()
+    else:
+        m = re.match(r'^\((\d+)\)\s*(.+)$', s)
+        if m:
+            s = m.group(2).strip()
+    s = re.sub(r'^【[^】]*】[\s　]+', '', s)
+    return s.strip()
 
 
 def read_gjoken(path):
@@ -910,7 +914,7 @@ def run(csv20, csv30, old_json, out_dir=None):
         nm = s.get('Mesho')
         if not nm:
             continue
-        labels = {lbl for _, lbl in gen_gjoken._g_options(analysis[0], s.get('SitsumonNo'))}
+        labels = {t[1] for t in gen_gjoken._g_options(analysis[0], s.get('SitsumonNo'))}
         existing_names.setdefault(nm, set()).update(labels)
     out = insert_new_columns(rows, g30, diffs, diffs['col_map'], g20, added_labels,
                              existing_names)
