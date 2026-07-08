@@ -165,8 +165,12 @@ class NewKotsuPlanGenerator:
                 _visits = getattr(self, '_branch_visited', [])
                 if len(_visits) < len(_scopes):
                     _visits = _visits + [set()] * (len(_scopes) - len(_visits))
+                # テーブル分割の従属列(例 トラッククレーン(長期割引あり/なし)規格区分・
+                #   駆動=L~CK)は片割れがautoで確定=スペック決定済。隙間昇格を抑止する
+                #   (2026-07-08 ① 公園照明160-822 フィードバック)。
                 if (len(self._selectable_rows(sn)) >= 2
                         and name not in _visible_names
+                        and not auto._has_autodetermined_twin(sit)
                         and any(sn in vi and auto._opens_on_forced_route(sn, sc)
                                 for sc, vi in zip(_scopes, _visits))):
                     plan.append([self._next_id(), name, 'vary', sn, name,

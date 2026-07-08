@@ -180,6 +180,40 @@ class TestPlanGenerator:
         drv = {(aj[rid].get('VarName') or '').strip() for rid in sel}
         return bool(drv) and all(v and v in input_vars for v in drv)
 
+    @staticmethod
+    def _strip_parens_name(s):
+        """名前から括弧内(全角/半角)を除いた基底名。例:
+        「トラッククレーン(長期割引あり)規格区分」→「トラッククレーン規格区分」。"""
+        import re
+        return re.sub(r'[（(][^）)]*[）)]', '', s or '').strip()
+
+    def _has_autodetermined_twin(self, sit):
+        """sn と『括弧内を除いた基底名が一致』かつ『AutoSelect駆動変数を共有』する
+        別質問が UI非可視(自動確定)で存在するか(2026-07-08 ①クレーン規格区分)。
+
+        真なら sn の『隙間で開く』昇格(_opens_on_forced_route)は、Gaia内部の
+        テーブル分割(例: トラッククレーン(長期割引あり/なし)規格区分・駆動=L~CK)の
+        アーティファクトであり、片割れがautoで確定している=スペックは決まっている。
+        → 昇格を抑止して auto に留める(入力条件Jとして出さない)。
+        """
+        my_no = sit.get('SitsumonNo')
+        my_base = self._strip_parens_name(sit.get('Mesho'))
+        my_drv = set(self._autoselect_vars_of(sit))
+        if not my_base or not my_drv:
+            return False
+        for s2 in self.new_json.data.get('SitsumonItem', []) or []:
+            if s2.get('SitsumonNo') == my_no:
+                continue
+            if s2.get('SitsumonKind') not in (17, 19):
+                continue
+            if self._strip_parens_name(s2.get('Mesho')) != my_base:
+                continue
+            if not (set(self._autoselect_vars_of(s2)) & my_drv):
+                continue
+            if not self._is_ui_visible_axis(s2):
+                return True
+        return False
+
     def _is_kind8_echo(self, sit):
         """Kind=8 が「分岐の選択肢ごとのマスタ展開(エコー)」かどうか。
         親の分岐(FlowKind=2)の遷移先に Kind=8 が2つ以上ある場合、選択は分岐質問側で
