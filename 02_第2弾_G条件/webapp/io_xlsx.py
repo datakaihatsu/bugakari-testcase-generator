@@ -33,6 +33,9 @@ WRAP_COL_WIDTH = 32               # 折り返しセル(セル内改行あり)の
 # TC「条件（軸）列」ヘッダーの塗り色（積算シミュレートで選ぶ列。標準単価表に色合わせ）。
 # 淡いブルー（Excel定番の帳票色）。標準単価表の実色が分かれば差し替える。
 CONDITION_HEADER_FILL = 'DCE6F1'
+# TCの2件目以降のパターンで「直前の行と選択肢が変わった条件セル」を塗る色（淡い黄）。
+# どの条件を切り替えたパターンかを一目で分かるようにする（2026-07-09 運用者フィードバック）。
+CHANGED_CELL_FILL = 'FFF2CC'
 # TC末尾の観点/期待列（この手前までが条件列）。先頭2列=テストID/テスト区分はメタ。
 _TC_TRAILING_EXACT = ('選択肢の適切さ確認', '規格名計上')
 _TC_TRAILING_PREFIX = ('代価表行と数量', '期待:')
@@ -171,6 +174,24 @@ def matrix_to_xlsx(matrix, xlsx_path, sheet_title='Sheet1',
             fill = PatternFill('solid', fgColor=header_fill)
             for c in highlight_header_cols:
                 ws.cell(row=1, column=c).fill = fill
+
+    # TCの2件目以降のパターン: 直前行と変わった条件セルだけ塗る（変更点の可視化）。
+    #   TC（条件列が取れる）ときのみ。'-'/空への変化は「選択肢の切替」ではないので塗らない。
+    diff_cols = detect_tc_condition_cols(matrix)
+    if diff_cols:
+        change_fill = PatternFill('solid', fgColor=CHANGED_CELL_FILL)
+        prev = None
+        for r in range(2, len(matrix) + 1):      # 1始まり行番号（1=見出し）
+            row = matrix[r - 1]
+            if prev is not None:                 # 2件目以降のパターンのみ比較
+                for c in diff_cols:
+                    cur = str(row[c - 1]).strip() if c - 1 < len(row) else ''
+                    pv = str(prev[c - 1]).strip() if c - 1 < len(prev) else ''
+                    if cur != pv and cur not in ('', '-'):
+                        cell = ws.cell(row=r, column=c)
+                        if cell.value is not None:
+                            cell.fill = change_fill
+            prev = row
 
     os.makedirs(os.path.dirname(os.path.abspath(xlsx_path)), exist_ok=True)
     wb.save(xlsx_path)

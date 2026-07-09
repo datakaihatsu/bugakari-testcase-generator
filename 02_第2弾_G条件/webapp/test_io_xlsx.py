@@ -105,6 +105,32 @@ class TestConditionCols(unittest.TestCase):
         self.assertNotEqual(ws.cell(1, 1).fill.fgColor.rgb[-6:], io_xlsx.CONDITION_HEADER_FILL)
         self.assertNotEqual(ws.cell(1, 5).fill.fgColor.rgb[-6:], io_xlsx.CONDITION_HEADER_FILL)
 
+    def test_changed_cell_fill(self):
+        """2件目以降のTC行で、直前行と変わった条件セルだけ CHANGED_CELL_FILL で塗る。"""
+        import openpyxl as pyxl
+        d = tempfile.mkdtemp(prefix='ioxlsx_chg_')
+        m = [['テストID', 'テスト区分', '作業区分', '作業内容', '選択肢の適切さ確認'],
+             ['TC-001', '回帰', 'a', 'x', ''],   # 1件目=基準(塗らない)
+             ['TC-002', '差分', 'b', 'x', ''],   # 作業区分だけ変化
+             ['TC-003', '差分', 'b', '-', '']]   # 作業内容が '-' へ(=選択肢の切替でない→塗らない)
+        x = os.path.join(d, 'chg.xlsx')
+        io_xlsx.matrix_to_xlsx(m, x)
+        ws = pyxl.load_workbook(x).active
+
+        def is_changed(r, c):
+            f = ws.cell(r, c).fill
+            return bool(f.patternType) and f.fgColor.rgb[-6:] == io_xlsx.CHANGED_CELL_FILL
+
+        # 1件目(row2)は一切塗らない
+        self.assertFalse(is_changed(2, 3))
+        self.assertFalse(is_changed(2, 4))
+        # 2件目(row3): 作業区分(col3)が変化 → 塗る / 作業内容(col4)は不変 → 塗らない
+        self.assertTrue(is_changed(3, 3))
+        self.assertFalse(is_changed(3, 4))
+        # 3件目(row4): 作業区分は不変・作業内容は '-' へ → どちらも塗らない
+        self.assertFalse(is_changed(4, 3))
+        self.assertFalse(is_changed(4, 4))
+
 
 class TestRealData(unittest.TestCase):
     """実在する 06土のう の G条件 / TC を round-trip。"""

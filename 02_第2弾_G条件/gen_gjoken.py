@@ -463,6 +463,11 @@ def build_g(json_path, out_dir=None, label=None):
     out.append(['(注)'])
     for i, nn in enumerate(notes, 1):
         out.append(['', f'{i}. {nn}'])
+    # (外部設計メモ): 人が自由記述するための欄。テストケース生成には一切影響しない
+    #   (③ read_gjoken はこの見出しで読み取りを打ち切る。2026-07-09 運用者フィードバック)。
+    out.append([])
+    out.append(['(外部設計メモ)'])
+    out.append(['', '※自由記述欄です。ここへの記入はテストケース生成に影響しません。'])
 
     if out_dir is None:
         out_dir = os.path.dirname(json_path)

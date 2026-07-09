@@ -15,7 +15,8 @@
 
   <nav class="tabs">
     <button class="tab active" data-tab="t1">① G条件生成</button>
-    <button class="tab" data-tab="t3">③ テストケース生成</button>
+    <button class="tab" data-tab="t3">③ テストケース生成（改定）</button>
+    <button class="tab" data-tab="tnew">🆕 新規歩掛（テストケース生成）</button>
   </nav>
 
   <!-- ① G条件生成 -->
@@ -60,6 +61,26 @@
         <span id="tcSpinner" class="spinner hidden">生成中… (工種により数十秒)</span>
       </div>
       <div id="genTCResult" class="result"></div>
+    </div>
+  </section>
+
+  <!-- 🆕 新規歩掛（テストケース生成） -->
+  <section id="tnew" class="panel">
+    <div class="card">
+      <h2>🆕 新規歩掛：改修後G条件から テストケースを生成</h2>
+      <p class="hint">新規に追加する歩掛で、まだ改定前JSON・商品G条件が無い場合に使います。
+        改修後G条件（人が基準書から作成した .xlsx）1枚だけからテストケースを生成します。</p>
+
+      <fieldset>
+        <legend>枠C: 改修後G条件（新規歩掛・.xlsx）</legend>
+        <input id="gnewFile" type="file" accept=".xlsx,.csv">
+      </fieldset>
+
+      <div class="row">
+        <button id="btnGenTCNew">テストケースを生成</button>
+        <span id="tcNewSpinner" class="spinner hidden">生成中…</span>
+      </div>
+      <div id="genTCNewResult" class="result"></div>
     </div>
   </section>
 

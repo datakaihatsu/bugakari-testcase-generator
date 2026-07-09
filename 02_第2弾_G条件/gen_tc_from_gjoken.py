@@ -93,6 +93,11 @@ def read_gjoken(path):
         joined = ''.join(c.strip() for c in row) if row else ''
         if not joined:
             continue
+        # (外部設計メモ)以降は人の自由記述欄 → 列/注として解釈せず読み取りを打ち切る
+        #   (2026-07-09 運用者フィードバック: メモはTC生成に影響させない)。
+        #   旧名(設計メモ)も後方互換で拾えるよう「設計メモ」を含む見出しで判定。
+        if '設計メモ' in head or '設計メモ' in joined:
+            break
         if head == '(注)' or joined == '(注)':
             in_notes = True
             continue
@@ -1169,6 +1174,172 @@ def _mark_new_choice(row, col, opt, kansatsu_i, kikaku_i, exp_idx, ins):
 
 
 # ------------------------------------------------------------------
+# 新規歩掛モード: 改修後G条件(表)1枚だけから TC を生成する
+#   (2026-07-09 運用者フィードバック: 新規歩掛は改定前JSON/商品G条件が存在しない)
+# ------------------------------------------------------------------
+
+NEW_BASE_KANTEN = '・各条件を既定(先頭)の選択肢で選んだ場合の計上がGaia条件と一致していること'
+
+
+def build_tc_from_single_gjoken(g30):
+    """改修後G条件(表)だけから改定後TC同形式の叩き台を組む。
+
+    JSON/差分は使わない。表の 列・選択肢・(注)ゲート から直接展開する:
+      - 既定行(回帰): 各列を先頭選択肢に。(注)ゲートで不要になる列は「-」。
+      - 差分行: 列ごとに非既定の選択肢を1つずつ振る(他列は既定=one-factor-at-a-time)。
+        ★対象列が既定で(注)ゲートに閉じられている場合は、源泉列を開く選択肢へ
+          切り替えてから振る(でないと対象列が常に「-」で網羅できない)。
+      - 数値入力列/単一選択肢の(固定)列は差分行を作らない(合格TC書式)。
+      - 代価表行と数量・選択肢の適切さ確認・規格名計上 の各列は③と同じ体裁で埋める。
+    """
+    cols = g30.get('cols', [])
+    notes = g30.get('notes', [])
+    n = len(cols)
+
+    def raws_of(c):
+        return c.get('opts_raw') or c.get('opts') or []
+
+    def default_raw(i):
+        c = cols[i]
+        if c.get('numeric'):
+            return '任意'
+        rs = raws_of(c)
+        return rs[0] if rs else '-'
+
+    def raw_at(i, j):
+        c = cols[i]
+        rs = raws_of(c)
+        if j < len(rs):
+            return rs[j]
+        opts = c.get('opts') or []
+        return opts[j] if j < len(opts) else '-'
+
+    def closing_choices(src, tgt):
+        """源泉列 src が対象列 tgt を閉じる選択肢ラベル集合。"""
+        return {nt.get('src_choice') for nt in notes
+                if nt.get('src_g') == src and tgt in nt.get('targets', [])}
+
+    base = [default_raw(i) for i in range(n)]
+
+    def apply_gate(cond):
+        cond = list(cond)
+        for nt in notes:
+            sg = nt.get('src_g')
+            if sg is None or not (0 <= sg < n):
+                continue
+            if _norm(cond[sg]) == nt.get('src_choice'):
+                for t in nt.get('targets', []):
+                    if 0 <= t < n:
+                        cond[t] = '-'
+        return cond
+
+    def open_base_for(i):
+        """列 i を可視化する土台。i を閉じる源泉列が既定で閉じているなら開く選択肢へ切替。"""
+        cond = list(base)
+        for nt in notes:
+            if i not in nt.get('targets', []):
+                continue
+            sg = nt.get('src_g')
+            if sg is None or not (0 <= sg < n):
+                continue
+            if _norm(cond[sg]) != nt.get('src_choice'):
+                continue
+            closing = closing_choices(sg, i)
+            opts = cols[sg].get('opts') or []
+            alt = next((k for k, o in enumerate(opts) if o not in closing), None)
+            if alt is not None:
+                cond[sg] = raw_at(sg, alt)
+        return cond
+
+    # ヘッダー(③と同じ列体裁)
+    cond_header = []
+    for c in cols:
+        nm = c.get('name', '')
+        if not c.get('numeric') and len((c.get('opts') or [])) <= 1:
+            nm = nm + '(固定)'
+        cond_header.append(nm)
+    header = list(_LEAD_COLS) + cond_header + [DAIKA_COL, '選択肢の適切さ確認', '規格名計上']
+
+    # 展開計画: (テスト区分, cond, 振った列index or None, 振った選択肢ラベル or None)
+    #   新規歩掛には「改定前」が無いので基準行の区分は「回帰」でなく「基準」
+    #   (2026-07-09 運用者フィードバック)。差分行=基準から1条件だけ変えた行。
+    plan = [('基準', apply_gate(base), None, None)]
+    for i, c in enumerate(cols):
+        opts = c.get('opts') or []
+        if c.get('numeric') or len(opts) <= 1:
+            continue
+        ob = open_base_for(i)
+        for j in range(1, len(opts)):
+            cond = list(ob)
+            cond[i] = raw_at(i, j)
+            plan.append(('差分', apply_gate(cond), i, opts[j]))
+
+    def gate_note_for(vi, cond, vlabel):
+        parts = []
+        for nt in notes:
+            if nt.get('src_g') != vi or _norm(cond[vi]) != nt.get('src_choice'):
+                continue
+            tnames = [cols[t].get('name', '') for t in nt.get('targets', [])
+                      if 0 <= t < n]
+            if tnames:
+                tstr = '・'.join(f'「{t}」' for t in tnames)
+                parts.append(f'・「{vlabel}」選択時は {tstr} が入力対象外(不要)になっていること')
+        return '\n'.join(parts)
+
+    out = [header]
+    first = True
+    for kind, cond, vi, vlabel in plan:
+        row = ['', kind] + list(cond)
+        daika = DAIKA_TEXT if first else DAIKA_DITTO
+        first = False
+        if kind == '基準':
+            kanten = NEW_BASE_KANTEN
+            kikaku = ''
+        else:
+            gk = gate_note_for(vi, cond, vlabel)
+            kanten = (f"{cols[vi].get('name', '')}\n"
+                      f"・「{vlabel}」を選択した場合の計上がGaia条件と一致していること"
+                      + (('\n' + gk) if gk else ''))
+            kikaku = ''
+            if cols[vi].get('kikaku'):
+                kikaku = (f"・{cols[vi].get('name', '')} の規格名計上が"
+                          f"意図通りの場所に正しく計上されているか")
+        row += [daika, kanten, kikaku]
+        out.append(row)
+
+    # TC採番 → どのルートでも開かない(全行'-'/空)条件列を落とす(③と同方針)
+    n_tc = 0
+    for r in out[1:]:
+        n_tc += 1
+        r[0] = f'TC-{n_tc:03d}'
+    out = drop_unused_condition_columns(out)
+    return out
+
+
+def _koshu_from_gname(path, fallback='新規歩掛'):
+    """G条件CSV/xlsxのファイル名 Gaia入力基準表_<工種>(<単位>)… から工種名を拾う。"""
+    m = re.search(r'Gaia入力基準表_(.+?)\(', os.path.basename(path))
+    if m:
+        return re.sub(r'[\\/:*?"<>|]', '_', m.group(1)).strip()
+    return fallback
+
+
+def run_single(csv30, out_dir=None, koshu=None):
+    """改修後G条件(表)1枚から改定後TC叩き台CSVを生成する(新規歩掛モード)。"""
+    if out_dir is None:
+        out_dir = os.path.join(os.getcwd(), 'out_tc')
+    os.makedirs(out_dir, exist_ok=True)
+    g30 = read_gjoken(csv30)
+    out = build_tc_from_single_gjoken(g30)
+    koshu = koshu or _koshu_from_gname(csv30)
+    s3 = os.path.join(out_dir, f'step3.0_テストケース_{koshu}.csv')
+    BugakariJSON.write_csv(out, s3)
+    n = len(out) - 1
+    print(f'新規歩掛TC叩き台 生成完了: {s3}  (TC {n}件 / 列 {len(out[0])})')
+    return s3
+
+
+# ------------------------------------------------------------------
 # main
 # ------------------------------------------------------------------
 
@@ -1259,8 +1430,14 @@ def run(csv20, csv30, old_json, out_dir=None):
 
 
 if __name__ == '__main__':
+    # 新規歩掛モード: python3 gen_tc_from_gjoken.py --single <G条件CSV> [出力dir]
+    if len(sys.argv) >= 3 and sys.argv[1] == '--single':
+        run_single(sys.argv[2], sys.argv[3] if len(sys.argv) > 3 else None)
+        sys.exit(0)
     if len(sys.argv) < 4:
-        print('Usage: python3 gen_tc_from_gjoken.py <20_叩き台G条件CSV> <30_人作成G条件CSV> <改定前JSON> [出力dir]')
+        print('Usage:')
+        print('  python3 gen_tc_from_gjoken.py <20_叩き台G条件CSV> <30_人作成G条件CSV> <改定前JSON> [出力dir]')
+        print('  python3 gen_tc_from_gjoken.py --single <改修後G条件CSV> [出力dir]   (新規歩掛モード)')
         sys.exit(1)
     run(sys.argv[1], sys.argv[2], sys.argv[3],
         sys.argv[4] if len(sys.argv) > 4 else None)

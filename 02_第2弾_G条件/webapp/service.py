@@ -104,8 +104,14 @@ def _note_count(matrix):
     nb = io_xlsx._note_boundary(matrix)
     if nb >= len(matrix):
         return 0
-    return sum(1 for r in matrix[nb + 1:]
-               if len(r) > 1 and str(r[1]).strip())
+    cnt = 0
+    for r in matrix[nb + 1:]:
+        # (外部設計メモ)以降は自由記述欄なので注の件数に数えない（旧名(設計メモ)も拾う）
+        if r and '設計メモ' in str(r[0]):
+            break
+        if len(r) > 1 and str(r[1]).strip():
+            cnt += 1
+    return cnt
 
 
 # ----------------------------------------------------------------------------
@@ -191,8 +197,44 @@ def gen_tc(g20, g30, old_json, cfg=None, out_dir=None):
     return out
 
 
+# ----------------------------------------------------------------------------
+# 新規歩掛: 改修後G条件だけから TC生成（改定前JSON/商品G条件なし）
+# ----------------------------------------------------------------------------
+def gen_tc_new(g30, cfg=None, out_dir=None):
+    """新規歩掛タブ: 改修後G条件(g30, xlsx/csv) 1枚 → 改定後TC CSV＋「テストケース_」xlsx。
+    改定前JSON・商品G条件は使わない（表の列・選択肢・注から直接展開）。
+    戻り値: {error, csv_path, xlsx_path, log, tc_count, col_count, workdir}"""
+    cfg = cfg or load_config()
+    out = {'error': None, 'csv_path': None, 'xlsx_path': None, 'log': '',
+           'tc_count': None, 'col_count': None, 'workdir': None}
+    if not g30 or not os.path.exists(g30):
+        out['error'] = '改修後G条件が見つかりません: %s' % g30
+        return out
+    try:
+        wd = out_dir or new_workdir(cfg, 'gentcnew_')
+        out['workdir'] = wd
+        # 工種名は元ファイル名から拾う（_to_csv でリネームされる前に）
+        koshu = gen_tc_from_gjoken._koshu_from_gname(g30)
+        csv30 = _to_csv(g30, wd, '30_G条件.csv')
+        s3, log = _capture(gen_tc_from_gjoken.run_single, csv30, wd, koshu)
+        out['csv_path'] = s3
+        out['log'] = log
+        xlsx = os.path.join(wd, 'テストケース_%s.xlsx' % (koshu or '出力'))
+        io_xlsx.csv_to_xlsx(s3, xlsx)  # 条件列見出し＋変更セルを自動色付け
+        out['xlsx_path'] = xlsx
+        matrix, _ = io_xlsx.read_csv_matrix(s3)
+        if matrix:
+            out['tc_count'] = max(0, len(matrix) - 1)
+            out['col_count'] = len(matrix[0])
+    except Exception as e:  # noqa: BLE001
+        out['error'] = _fmt_err(e)
+        out['log'] += '\n' + traceback.format_exc()
+    return out
+
+
 if __name__ == '__main__':
     # 簡易CLI: python3 service.py locate <キー> / geng <json> / gentc <g20> <g30> <oldjson>
+    #          / gentcnew <g30>
     cmd = sys.argv[1] if len(sys.argv) > 1 else ''
     if cmd == 'locate':
         print(json.dumps(locate_versions(sys.argv[2]), ensure_ascii=False, indent=2))
@@ -204,5 +246,10 @@ if __name__ == '__main__':
         r = gen_tc(sys.argv[2], sys.argv[3], sys.argv[4])
         print(json.dumps({k: v for k, v in r.items() if k != 'log'}, ensure_ascii=False, indent=2))
         print('--- log ---\n' + r['log'])
+    elif cmd == 'gentcnew':
+        r = gen_tc_new(sys.argv[2])
+        print(json.dumps({k: v for k, v in r.items() if k != 'log'}, ensure_ascii=False, indent=2))
+        print('--- log ---\n' + r['log'])
     else:
-        print('Usage: python3 service.py locate <key> | geng <json> | gentc <g20> <g30> <oldjson>')
+        print('Usage: python3 service.py locate <key> | geng <json> '
+              '| gentc <g20> <g30> <oldjson> | gentcnew <g30>')

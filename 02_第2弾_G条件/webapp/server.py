@@ -141,6 +141,8 @@ class Handler(BaseHTTPRequestHandler):
                 self._api_gen_g()
             elif route == '/api/gen_tc':
                 self._api_gen_tc()
+            elif route == '/api/gen_tc_new':
+                self._api_gen_tc_new()
             else:
                 self._send_json({'error': 'not found'}, 404)
         except Exception as e:  # noqa: BLE001 UIへ返す
@@ -208,6 +210,20 @@ class Handler(BaseHTTPRequestHandler):
                 self._send_json({'error': '改定前JSONが特定できません。先に①を実行してください'})
                 return
         r = service.gen_tc(g20, g30, old_json, CFG)
+        if not r['error']:
+            r['download_token'] = _register_download(r['xlsx_path'])
+            r['download_name'] = os.path.basename(r['xlsx_path'])
+        self._send_json(r)
+
+    def _api_gen_tc_new(self):
+        """新規歩掛: 改修後G条件(枠C)1枚だけからTC生成（改定前JSON/商品G条件なし）。"""
+        body = self._read_json()
+        if not body.get('g30_b64'):
+            self._send_json({'error': '改修後G条件(枠C)を指定してください'})
+            return
+        wd = service.new_workdir(CFG, 'uploadnew_')
+        g30 = self._decode_upload(body['g30_b64'], body.get('g30_name'), wd, '30新規歩掛.xlsx')
+        r = service.gen_tc_new(g30, CFG)
         if not r['error']:
             r['download_token'] = _register_download(r['xlsx_path'])
             r['download_name'] = os.path.basename(r['xlsx_path'])

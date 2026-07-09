@@ -162,6 +162,24 @@ $('btnGenTC').addEventListener('click', async () => {
     + logBlock(r);
 });
 
+// ---- 🆕 新規歩掛 gen_tc_new ----
+$('btnGenTCNew').addEventListener('click', async () => {
+  const box = $('genTCNewResult');
+  const f = $('gnewFile').files[0];
+  if (!f) { box.innerHTML = '<span class="err">枠C（改修後G条件）のファイルを選んでください</span>'; return; }
+  box.innerHTML = '';
+  $('tcNewSpinner').classList.remove('hidden');
+  $('btnGenTCNew').disabled = true;
+  const r = await postJSON('/api/gen_tc_new', { g30_b64: await fileToBase64(f), g30_name: f.name });
+  $('tcNewSpinner').classList.add('hidden');
+  $('btnGenTCNew').disabled = false;
+  if (r.error) { box.innerHTML = `<span class="err">${esc(r.error)}</span>${logBlock(r)}`; return; }
+  box.innerHTML = `<div class="summary ok">テストケースを生成しました（TC ${r.tc_count} 件 / 列 ${r.col_count}）</div>`
+    + dlLink(r)
+    + '<div class="hint">条件列の見出しは色付き。2件目以降のパターンは、直前の行と変わった選択肢セルが色付きです。生成後は必ず人が目視レビューしてください。</div>'
+    + logBlock(r);
+});
+
 // init
 loadConfig();
 syncG20Mode();
