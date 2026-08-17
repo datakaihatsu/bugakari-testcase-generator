@@ -1,0 +1,11 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "gaia-tc-webapp",
+      "runtimeExecutable": "python",
+      "runtimeArgs": ["02_第2弾_G条件/webapp/server.py"],
+      "port": 8765
+    }
+  ]
+}

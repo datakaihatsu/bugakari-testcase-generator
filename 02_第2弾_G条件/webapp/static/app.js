@@ -20,6 +20,19 @@ function dlLink(r) {
   if (!r.download_token) return '';
   return `<a class="dl" href="/api/download?token=${encodeURIComponent(r.download_token)}">⬇ ${esc(r.download_name)} をダウンロード</a>`;
 }
+// 改修後G条件の (注) 解釈結果。読めなかった注／番号ずれをここで名指しする
+// （黙って捨てるとTCに反映されず、後工程で気づけないため）。
+function noteLintBlock(r) {
+  const lines = r.note_lint || [];
+  if (!lines.length) return '';
+  const worst = lines.some((l) => l.level === 'ERROR') ? 'err'
+    : (lines.some((l) => l.level === 'WARN') ? 'warn' : 'info');
+  const items = lines.map((l) => {
+    const cls = l.level === 'ERROR' ? 'err' : (l.level === 'WARN' ? 'warn' : 'info');
+    return `<li class="${cls}">${esc(l.text)}</li>`;
+  }).join('');
+  return `<div class="notelint ${worst}"><div class="notelint-h">(注)の解釈</div><ul>${items}</ul></div>`;
+}
 function logBlock(r) {
   if (!r.log) return '';
   return `<details class="log"><summary>実行ログ</summary><pre>${esc(r.log)}</pre></details>`;
@@ -157,6 +170,7 @@ $('btnGenTC').addEventListener('click', async () => {
   $('btnGenTC').disabled = false;
   if (r.error) { box.innerHTML = `<span class="err">${esc(r.error)}</span>${logBlock(r)}`; return; }
   box.innerHTML = `<div class="summary ok">テストケースを生成しました（TC ${r.tc_count} 件 / 列 ${r.col_count}）</div>`
+    + noteLintBlock(r)
     + dlLink(r)
     + '<div class="hint">条件（積算で選ぶ）列の見出しは色付き。生成後は必ず人が目視レビューしてください。</div>'
     + logBlock(r);
@@ -175,6 +189,7 @@ $('btnGenTCNew').addEventListener('click', async () => {
   $('btnGenTCNew').disabled = false;
   if (r.error) { box.innerHTML = `<span class="err">${esc(r.error)}</span>${logBlock(r)}`; return; }
   box.innerHTML = `<div class="summary ok">テストケースを生成しました（TC ${r.tc_count} 件 / 列 ${r.col_count}）</div>`
+    + noteLintBlock(r)
     + dlLink(r)
     + '<div class="hint">条件列の見出しは色付き。2件目以降のパターンは、直前の行と変わった選択肢セルが色付きです。生成後は必ず人が目視レビューしてください。</div>'
     + logBlock(r);

@@ -1,12 +1,13 @@
 :root {
   --bg: #f5f6f8; --fg: #1c2430; --card: #ffffff; --border: #d4d9e0;
   --accent: #2b6cb0; --accent-fg: #fff; --hint: #6b7684; --ok: #1f7a4d;
-  --err: #b02a2a; --cond: #dce6f1; --log-bg: #f0f2f5;
+  --err: #b02a2a; --warn: #a35a00; --cond: #dce6f1; --log-bg: #f0f2f5;
 }
 @media (prefers-color-scheme: dark) {
   :root {
     --bg: #1a1d22; --fg: #e6e9ee; --card: #24282f; --border: #3a404a;
     --accent: #4a90d9; --hint: #9aa4b2; --log-bg: #1e2127; --cond: #2c3b52;
+    --err: #ff8a80; --warn: #e0a458;
   }
 }
 * { box-sizing: border-box; }
@@ -70,6 +71,17 @@ details.log pre {
   background: var(--log-bg); border: 1px solid var(--border); border-radius: 6px;
   padding: 10px; overflow-x: auto; font-size: 12px; white-space: pre-wrap;
 }
+/* (注)の解釈結果。読めなかった注／注番号ずれを生成直後に名指しする */
+.notelint { margin: 10px 0; padding: 10px 12px; border-radius: 6px;
+  border: 1px solid var(--border); background: var(--log-bg); font-size: 13px; }
+.notelint.err { border-color: var(--err); }
+.notelint.warn { border-color: var(--warn); }
+.notelint-h { font-weight: 600; margin-bottom: 4px; }
+.notelint ul { margin: 0; padding-left: 20px; }
+.notelint li { margin: 2px 0; white-space: pre-wrap; }
+.notelint li.warn { color: var(--warn); }
+.notelint li.info { color: var(--fg); }
+
 .handoff { font-size: 13px; margin-bottom: 8px; }
 .handoff .chip { background: var(--cond); padding: 3px 10px; border-radius: 12px; }
 .spinner { color: var(--hint); font-size: 13px; }

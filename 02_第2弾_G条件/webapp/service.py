@@ -100,6 +100,17 @@ def _apply_ymd(json_path):
     return m.group(2) if m else ''
 
 
+def _note_lint(csv30):
+    """改修後G条件CSVの(注)を解釈し、UI表示用の指摘リストを返す。
+    [{level: INFO/WARN/ERROR, text}]。読めなかった注を黙って捨てないための可視化
+    (2026-08-17 運用FB: 語尾の揺れ・注番号ずれで注が無効化され往復が発生した)。"""
+    try:
+        g = gen_tc_from_gjoken.read_gjoken(csv30)
+        return gen_tc_from_gjoken.note_lint(g)
+    except Exception:  # noqa: BLE001  表示用の付加情報なので生成自体は止めない
+        return []
+
+
 def _note_count(matrix):
     nb = io_xlsx._note_boundary(matrix)
     if nb >= len(matrix):
@@ -169,7 +180,7 @@ def gen_tc(g20, g30, old_json, cfg=None, out_dir=None):
     戻り値: {error, csv_path, xlsx_path, log, tc_count, col_count, workdir}"""
     cfg = cfg or load_config()
     out = {'error': None, 'csv_path': None, 'xlsx_path': None, 'log': '',
-           'tc_count': None, 'col_count': None, 'workdir': None}
+           'tc_count': None, 'col_count': None, 'workdir': None, 'note_lint': []}
     for label, p in (('商品G条件', g20), ('改修後G条件', g30), ('改定前JSON', old_json)):
         if not p or not os.path.exists(p):
             out['error'] = '%s が見つかりません: %s' % (label, p)
@@ -179,6 +190,7 @@ def gen_tc(g20, g30, old_json, cfg=None, out_dir=None):
         out['workdir'] = wd
         csv20 = _to_csv(g20, wd, '20_G条件.csv')
         csv30 = _to_csv(g30, wd, '30_G条件.csv')
+        out['note_lint'] = _note_lint(csv30)
         s3, log = _capture(gen_tc_from_gjoken.run, csv20, csv30, old_json, wd)
         out['csv_path'] = s3
         out['log'] = log
@@ -206,7 +218,7 @@ def gen_tc_new(g30, cfg=None, out_dir=None):
     戻り値: {error, csv_path, xlsx_path, log, tc_count, col_count, workdir}"""
     cfg = cfg or load_config()
     out = {'error': None, 'csv_path': None, 'xlsx_path': None, 'log': '',
-           'tc_count': None, 'col_count': None, 'workdir': None}
+           'tc_count': None, 'col_count': None, 'workdir': None, 'note_lint': []}
     if not g30 or not os.path.exists(g30):
         out['error'] = '改修後G条件が見つかりません: %s' % g30
         return out
@@ -216,6 +228,7 @@ def gen_tc_new(g30, cfg=None, out_dir=None):
         # 工種名は元ファイル名から拾う（_to_csv でリネームされる前に）
         koshu = gen_tc_from_gjoken._koshu_from_gname(g30)
         csv30 = _to_csv(g30, wd, '30_G条件.csv')
+        out['note_lint'] = _note_lint(csv30)
         s3, log = _capture(gen_tc_from_gjoken.run_single, csv30, wd, koshu)
         out['csv_path'] = s3
         out['log'] = log

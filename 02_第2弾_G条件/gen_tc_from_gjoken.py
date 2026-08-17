@@ -61,6 +61,65 @@ def _read_csv_any(path):
     raise RuntimeError(f'エンコーディング判別不可: {path}')
 
 
+# --- (注) の許容表現 -------------------------------------------------
+#   ①(gen_gjoken)が自動生成する注は常に「…を入力する必要はない」だが、
+#   改修後G条件表(30)は人が手編集するため語尾が揺れる
+#   (2026-08-17 運用FB: 「選択する必要はない」「選択できない」が黙って捨てられ、
+#    ゲート未認識→対象列が'-'にならず・源泉列がvary昇格しない不具合)。
+#   同義の語尾を広く受け入れ、読めなかった注は note_issues で可視化する。
+_NOTE_TAIL = (r'(?:を|は)\s*'
+              r'(?:(?:入力|選択|表示|指定)(?:する)?)?\s*'
+              r'(?:必要は(?:ない|ありません)|できない|されない|しない|不要)')
+_NOTE_PAT = re.compile(r'G(\d+)条件「(.+?)」で(.+?)(?:のいずれか)?を選択した場合は、'
+                       r'(.+?)\s*' + _NOTE_TAIL)
+# 注らしい行の判定(パースできなかったものを「読めなかった注」として報告するため)
+_NOTE_LIKE = re.compile(r'G\d+条件')
+
+
+def _norm_name(s):
+    """条件名の突合キー(空白/全角空白を無視)。"""
+    return re.sub(r'[\s　]+', '', str(s or ''))
+
+
+def _resolve_ref(gnum, name, cols, issues, where):
+    """(注)中の「G<gnum>条件「<name>」」を列indexへ解決する。
+    名称優先(人は名称を間違えにくい/列挿入で番号だけがずれるため)。
+    番号と名称が食い違う場合は名称を採用しWARNを残す。"""
+    idx_by_name = None
+    if name:
+        key = _norm_name(name)
+        hits = [i for i, c in enumerate(cols) if _norm_name(c['name']) == key]
+        if len(hits) == 1:
+            idx_by_name = hits[0]
+    num_ok = gnum is not None and 0 <= gnum < len(cols)
+    if idx_by_name is not None:
+        if num_ok and gnum != idx_by_name:
+            issues.append({
+                'level': 'WARN',
+                'text': (f'{where}: 番号G{gnum + 1}と名称「{name}」が不一致'
+                         f'(G{gnum + 1}＝「{cols[gnum]["name"]}」/ 名称は'
+                         f'G{idx_by_name + 1})。名称を優先して解釈しました。'
+                         f'条件表の注の番号を直してください。')})
+        elif not num_ok and gnum is not None:
+            issues.append({
+                'level': 'WARN',
+                'text': (f'{where}: 番号G{gnum + 1}は条件表に存在しません'
+                         f'(全{len(cols)}列)。名称「{name}」＝G{idx_by_name + 1}'
+                         f'として解釈しました。')})
+        return idx_by_name
+    if num_ok:
+        issues.append({
+            'level': 'WARN',
+            'text': (f'{where}: 名称「{name}」が条件表に見つかりません。'
+                     f'番号G{gnum + 1}＝「{cols[gnum]["name"]}」として解釈しました。')})
+        return gnum
+    issues.append({
+        'level': 'ERROR',
+        'text': (f'{where}: 番号G{gnum + 1 if gnum is not None else "?"}・'
+                 f'名称「{name}」のどちらでも列を特定できません。この注は無視されます。')})
+    return None
+
+
 def _strip_circled(s):
     """選択肢セルの ①..⑳ / (21) マーカーのみ除去(Gaiaコード【】は残す=表示用)。"""
     s = s.strip()
@@ -138,17 +197,38 @@ def read_gjoken(path):
     #     ①「A」・②「B」のいずれかを選択した場合は… / ①「A」～③「C」のいずれかを選択した場合は…
     #   → 選択肢ごとに1エントリへ展開して返す(下流ロジックは従来どおり単一選択肢前提)。
     notes = []
-    pat = re.compile(r'G(\d+)条件「(.+?)」で(.+?)(?:のいずれか)?を選択した場合は、(.+?)\s*を入力する必要はない')
-    for raw in notes_raw:
-        m = pat.search(raw)
+    issues = []
+    parsed = 0
+    for ni, raw in enumerate(notes_raw, 1):
+        where = f'注{ni}'
+        m = _NOTE_PAT.search(raw)
         if not m:
+            if _NOTE_LIKE.search(raw):
+                issues.append({
+                    'level': 'ERROR',
+                    'text': (f'{where}: 文の形が想定外でテストケースに反映できません'
+                             f'(この注は無視されます)。「Gx条件「A」で①「B」を選択した'
+                             f'場合は、Gy条件「C」を入力する必要はない。」の形に直して'
+                             f'ください。 → {raw}')})
             continue
-        src_g = int(m.group(1)) - 1
-        src_name = m.group(2).strip()
+        src_g = _resolve_ref(int(m.group(1)) - 1, m.group(2).strip(), cols, issues,
+                             f'{where}(条件側)')
+        if src_g is None:
+            continue
+        src_name = cols[src_g]['name']
         sel_part = m.group(3)
-        targets = [int(x) - 1 for x in re.findall(r'G(\d+)条件', m.group(4))]
+        # 対象列: 「Gy条件「名」」の番号と名称の対で解決(名称優先)。
+        pairs = re.findall(r'G(\d+)条件(?:「(.+?)」)?', m.group(4))
+        targets = []
+        for gs, nm in pairs:
+            t = _resolve_ref(int(gs) - 1, (nm or '').strip(), cols, issues,
+                             f'{where}(対象側)')
+            if t is not None and t not in targets:
+                targets.append(t)
+        if not targets:
+            continue
         labels = [x.strip() for x in re.findall(r'「(.+?)」', sel_part)]
-        if '～' in sel_part and len(labels) == 2 and 0 <= src_g < len(cols):
+        if '～' in sel_part and len(labels) == 2:
             opts = cols[src_g]['opts']
             try:
                 i0, i1 = opts.index(labels[0]), opts.index(labels[1])
@@ -156,10 +236,38 @@ def read_gjoken(path):
                     labels = opts[i0:i1 + 1]
             except ValueError:
                 pass
+        before = len(notes)
         for lbl in labels:
+            if lbl not in cols[src_g]['opts']:
+                issues.append({
+                    'level': 'ERROR',
+                    'text': (f'{where}: 選択肢「{lbl}」が条件「{src_name}」の'
+                             f'選択肢に存在しません(候補: '
+                             f'{" / ".join(cols[src_g]["opts"])})。'
+                             f'この条件分岐はテストケースに反映されません。')})
+                continue
             notes.append({'src_g': src_g, 'src_name': src_name,
                           'src_choice': lbl, 'targets': targets})
-    return {'cols': cols, 'notes': notes}
+        if len(notes) > before:
+            parsed += 1
+    return {'cols': cols, 'notes': notes, 'note_issues': issues,
+            'note_raw_count': len(notes_raw), 'note_parsed_count': parsed}
+
+
+def note_lint(g, label='改修後G条件'):
+    """(注)の解釈結果を人が読める行の並びで返す(UI/ログ共用)。
+    「注は3件あるが engine は2件しか使っていない」を可視化するのが目的。"""
+    issues = g.get('note_issues') or []
+    lines = []
+    raw = g.get('note_raw_count', 0)
+    ok = g.get('note_parsed_count', 0)
+    if raw:
+        head = f'{label}: (注) {raw}件のうち {ok}件をテストケースに反映しました。'
+        if ok < raw:
+            head += f' 残り {raw - ok}件は反映されていません。'
+        lines.append({'level': 'ERROR' if ok < raw else 'INFO', 'text': head})
+    lines.extend(issues)
+    return lines
 
 
 # ------------------------------------------------------------------
@@ -1324,12 +1432,23 @@ def _koshu_from_gname(path, fallback='新規歩掛'):
     return fallback
 
 
+def _print_note_lint(g30):
+    """(注)の解釈結果をログへ。UI(webapp)は service 側で同じ note_lint を使う。"""
+    lines = note_lint(g30)
+    if not lines:
+        return
+    print('【(注)の解釈】')
+    for ln in lines:
+        print(f"  [{ln['level']}] {ln['text']}")
+
+
 def run_single(csv30, out_dir=None, koshu=None):
     """改修後G条件(表)1枚から改定後TC叩き台CSVを生成する(新規歩掛モード)。"""
     if out_dir is None:
         out_dir = os.path.join(os.getcwd(), 'out_tc')
     os.makedirs(out_dir, exist_ok=True)
     g30 = read_gjoken(csv30)
+    _print_note_lint(g30)
     out = build_tc_from_single_gjoken(g30)
     koshu = koshu or _koshu_from_gname(csv30)
     s3 = os.path.join(out_dir, f'step3.0_テストケース_{koshu}.csv')
@@ -1354,6 +1473,7 @@ def run(csv20, csv30, old_json, out_dir=None):
 
     g20 = read_gjoken(csv20)
     g30 = read_gjoken(csv30)
+    _print_note_lint(g30)
     diffs = diff_gjoken(g20, g30)
     print('【G条件差分】')
     for i20, d in diffs['choice_diffs'].items():
