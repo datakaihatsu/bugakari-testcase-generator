@@ -5,7 +5,7 @@ test_server.py ― server.py のHTTP結合スモークテスト（標準ライ�
 エフェメラルポートでサーバをスレッド起動し、HTTPで①→③フローを駆動する。
 検証:
   - GET /            index.html が返る
-  - GET /api/config  パス・セッション状態
+  - GET /api/config  バージョン・パス・セッション状態
   - GET /static/app.js 静的資産
   - POST /api/gen_g   実JSON(06改定前)→G条件生成・DLトークン→DL可能
   - POST /api/gen_tc  引継ぎ(session)＋改修後(=06人作成CSVをbase64)→TC生成・DL可能
@@ -21,6 +21,7 @@ import unittest
 import urllib.request
 
 import server
+import version
 
 BASE = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '運用案件', '06_土のう積工'))
 OLD_JSON = os.path.join(BASE, '10_改定前', '32-735.20240401.20240401.json')
@@ -63,6 +64,9 @@ class TestServer(unittest.TestCase):
         c = json.loads(body)
         self.assertIn('expcd_path', c)
         self.assertIn('session', c)
+        # 画面ヘッダー右上のバージョン表示（受け渡し先との版の突き合わせに使う）
+        self.assertEqual(c.get('app_version'), version.APP_VERSION)
+        self.assertEqual(c.get('version_label'), version.VERSION_LABEL)
 
     def test_3_gen_g_then_download(self):
         st, body, _ = _req(self.base + '/api/gen_g', {'json_path': OLD_JSON})

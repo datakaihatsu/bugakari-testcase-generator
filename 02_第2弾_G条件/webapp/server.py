@@ -12,7 +12,7 @@ http.server ベース。127.0.0.1 バインドの単一ユーザ用ローカル�
 エンドポイント:
   GET  /                     index.html
   GET  /static/<file>        静的資産（static/ 配下のみ・パストラバーサル防止）
-  GET  /api/config           格納場所パス等（表示用）
+  GET  /api/config           バージョン・格納場所パス等（表示用）
   GET  /api/download?token=  生成物(xlsx)をトークンでDL（任意パス公開はしない）
   POST /api/locate           {input} → 歩掛キー×版候補
   POST /api/gen_g            {json_path} → G条件生成（商品_xlsx）。セッションに引継情報保存
@@ -35,6 +35,7 @@ if _HERE not in sys.path:
     sys.path.insert(0, _HERE)
 
 import service
+import version
 
 STATIC_DIR = os.path.join(_HERE, 'static')
 CFG = service.load_config()
@@ -56,7 +57,7 @@ def _register_download(path):
 
 
 class Handler(BaseHTTPRequestHandler):
-    server_version = 'GaiaTC/1.0'
+    server_version = 'GaiaTC/' + version.APP_VERSION
 
     def log_message(self, *args):
         pass  # 静音（必要時はここでロギング）
@@ -121,6 +122,9 @@ class Handler(BaseHTTPRequestHandler):
             self._serve_static(route[len('/static/'):])
         elif route == '/api/config':
             self._send_json({
+                'app_version': version.APP_VERSION,
+                'build_date': version.BUILD_DATE,
+                'version_label': version.VERSION_LABEL,
                 'expcd_path': CFG['expcd_path'],
                 'bugakari_root': CFG['bugakari_root'],
                 'session': {'has_handoff': bool(_SESSION['g20_csv'] and _SESSION['old_json']),
@@ -241,7 +245,7 @@ def main(open_browser=True):
     httpd = make_server()
     host, port = httpd.server_address
     url = 'http://127.0.0.1:%d/' % port
-    print('Gaia歩掛TCツール 起動:', url, ' (Ctrl+Cで終了)')
+    print('Gaia歩掛TCツール', version.VERSION_LABEL, '起動:', url, ' (Ctrl+Cで終了)')
     print('  ExpCD    :', CFG['expcd_path'])
     print('  Bugakari :', CFG['bugakari_root'])
     # ソケットは make_server の時点で bind+listen 済み → ここで開けば接続拒否にならない

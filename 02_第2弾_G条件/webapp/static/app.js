@@ -61,6 +61,7 @@ document.querySelectorAll('.tab').forEach((b) => {
 async function loadConfig() {
   try {
     const c = await (await fetch('/api/config')).json();
+    $('appver').textContent = c.version_label || '';
     $('cfgbar').textContent = `ExpCD: ${c.expcd_path}　|　歩掛: ${c.bugakari_root}`;
     updateHandoff(c.session);
   } catch (e) {
