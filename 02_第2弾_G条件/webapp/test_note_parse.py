@@ -160,5 +160,99 @@ class TestMultiTarget(unittest.TestCase):
             self.assertEqual(g['notes'][0]['targets'], [2, 0])
 
 
+class TestNestedQuotes(unittest.TestCase):
+    """選択肢名・条件名それ自体が「」を含む場合(2026-08-27 発覚 / 例 09養生マット
+    「「m2」単位の材料単価」)。非貪欲な 「(.+?)」 だと「m2 で切れ、注が丸ごと
+    無効化されていた。"""
+
+    BASE = [
+        '施工区分/入力条件,G1,G2',
+        '規格名計上,,',
+        '各種(条件名),養生マット材料の単位選択,1m2当り「養生マット」使用量',
+        ',①「m2」単位の材料単価,(実数入力)',
+        ',②「m2」単位以外の材料単価,',
+        '(注)',
+    ]
+
+    def _write(self, td, note):
+        path = os.path.join(td, 'g.csv')
+        lines = list(self.BASE) + [',"%s"' % note.replace('"', '""')]
+        with open(path, 'w', encoding='utf-8-sig', newline='') as f:
+            f.write(chr(10).join(lines) + chr(10))
+        return path
+
+    def test_choice_with_inner_quotes(self):
+        with tempfile.TemporaryDirectory() as td:
+            note = ('1. G1条件「養生マット材料の単位選択」で①「「m2」単位の材料単価」を'
+                    '選択した場合は、G2条件「1m2当り「養生マット」使用量」'
+                    'を入力する必要はない。')
+            g = G.read_gjoken(self._write(td, note))
+            self.assertEqual(len(g['notes']), 1, '注が解釈できていない')
+            nt = g['notes'][0]
+            self.assertEqual(nt['src_choice'], '「m2」単位の材料単価')
+            self.assertEqual(nt['targets'], [1], '対象列名の「」入れ子で切れている')
+            self.assertEqual(g['note_parsed_count'], 1)
+            self.assertEqual([i for i in g['note_issues'] if i['level'] == 'ERROR'], [])
+
+    def test_quoted_spans_helper(self):
+        self.assertEqual(G._quoted_spans('①「「m2」単位の材料単価」'),
+                         ['「m2」単位の材料単価'])
+        self.assertEqual(G._quoted_spans('①「A」・②「B」'), ['A', 'B'])
+        self.assertEqual(G._quoted_spans('対応の取れない」は無視'), [])
+
+
+class TestNumericSource(unittest.TestCase):
+    """実数入力の条件を起点にした注(2026-08-27)。
+
+    ①(gen_gjoken)は実数列を起点にする注を自分で「…で「任意」を選択した場合は」と
+    書き出すのに、③(read_gjoken)がそれを選択肢に無いと弾いてERRORにしていた
+    (例 26目地工: 注16件中3件が未反映)。ツール内の自己不整合の是正。
+    「任意」以外の不一致は従来どおりERROR(誤記の検知力は落とさない)。"""
+
+    BASE = [
+        '施工区分/入力条件,G1,G2',
+        '規格名計上,,',
+        '各種(条件名),1m当りチェアーの使用量,X3:チェアー1m当りの現場着価格',
+        ',(実数入力),(実数入力)',
+        ',(kg/m),(円/m)',
+        '(注)',
+    ]
+
+    def _read(self, td, note):
+        path = os.path.join(td, 'g.csv')
+        lines = list(self.BASE) + [',"%s"' % note.replace('"', '""')]
+        with open(path, 'w', encoding='utf-8-sig', newline='') as f:
+            f.write(chr(10).join(lines) + chr(10))
+        return G.read_gjoken(path)
+
+    def test_any_accepted(self):
+        with tempfile.TemporaryDirectory() as td:
+            g = self._read(td, '1. G1条件「1m当りチェアーの使用量」で「任意」を選択した'
+                               '場合は、G2条件「X3:チェアー1m当りの現場着価格」'
+                               'を入力する必要はない。')
+            self.assertEqual(len(g['notes']), 1)
+            nt = g['notes'][0]
+            # TC側は実数列を「任意」と出力するので突合キーも「任意」に寄せる
+            self.assertEqual(nt['src_choice'], '任意')
+            self.assertEqual(nt['targets'], [1])
+            self.assertEqual([i for i in g['note_issues'] if i['level'] == 'ERROR'], [])
+
+    def test_unit_label_normalized_to_any(self):
+        with tempfile.TemporaryDirectory() as td:
+            g = self._read(td, '1. G1条件「1m当りチェアーの使用量」で「(実数入力)」を選択'
+                               'した場合は、G2条件「X3:チェアー1m当りの現場着価格」'
+                               'を入力する必要はない。')
+            self.assertEqual([n['src_choice'] for n in g['notes']], ['任意'])
+
+    def test_typo_still_errors(self):
+        with tempfile.TemporaryDirectory() as td:
+            g = self._read(td, '1. G1条件「1m当りチェアーの使用量」で「にんい」を選択した'
+                               '場合は、G2条件「X3:チェアー1m当りの現場着価格」'
+                               'を入力する必要はない。')
+            self.assertEqual(g['notes'], [])
+            self.assertTrue([i for i in g['note_issues'] if i['level'] == 'ERROR'],
+                            '誤記が検知されなくなっている')
+
+
 if __name__ == '__main__':
     unittest.main(verbosity=2)

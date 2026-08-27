@@ -76,6 +76,28 @@ _NOTE_PAT = re.compile(r'G(\d+)条件「(.+?)」で(.+?)(?:のいずれか)?を�
 _NOTE_LIKE = re.compile(r'G\d+条件')
 
 
+def _quoted_spans(s):
+    """「…」で囲まれた部分を入れ子を考慮して取り出す。
+
+    選択肢名や条件名それ自体に「」を含む場合(例: ①「「m2」単位の材料単価」)、
+    非貪欲な正規表現 「(.+?)」 では「m2 で切れてしまい、選択肢が突合できず
+    (注)が丸ごと無効化される(2026-08-27 発覚 / 例 09養生マット: 注1件が0件反映)。
+    対応の取れない 」 は無視する(壊れた注でも他の注は生かす)。"""
+    out = []
+    depth = 0
+    start = -1
+    for i, ch in enumerate(s):
+        if ch == '「':
+            if depth == 0:
+                start = i + 1
+            depth += 1
+        elif ch == '」' and depth:
+            depth -= 1
+            if depth == 0:
+                out.append(s[start:i])
+    return out
+
+
 def _norm_name(s):
     """条件名の突合キー(空白/全角空白を無視)。"""
     return re.sub(r'[\s　]+', '', str(s or ''))
@@ -218,7 +240,12 @@ def read_gjoken(path):
         src_name = cols[src_g]['name']
         sel_part = m.group(3)
         # 対象列: 「Gy条件「名」」の番号と名称の対で解決(名称優先)。
-        pairs = re.findall(r'G(\d+)条件(?:「(.+?)」)?', m.group(4))
+        pairs = []
+        tgt_part = m.group(4)
+        for mt in re.finditer(r'G(\d+)条件', tgt_part):
+            rest = tgt_part[mt.end():]
+            sp = _quoted_spans(rest) if rest[:1] == '「' else []
+            pairs.append((mt.group(1), sp[0] if sp else ''))
         targets = []
         for gs, nm in pairs:
             t = _resolve_ref(int(gs) - 1, (nm or '').strip(), cols, issues,
@@ -227,7 +254,7 @@ def read_gjoken(path):
                 targets.append(t)
         if not targets:
             continue
-        labels = [x.strip() for x in re.findall(r'「(.+?)」', sel_part)]
+        labels = [x.strip() for x in _quoted_spans(sel_part)]
         if '～' in sel_part and len(labels) == 2:
             opts = cols[src_g]['opts']
             try:
@@ -238,6 +265,16 @@ def read_gjoken(path):
                 pass
         before = len(notes)
         for lbl in labels:
+            # 実数入力の条件を起点にした注: ①(gen_gjoken)自身が「任意」と書き出すため
+            #   (例「G9条件「1m当りチェアーの使用量」で「任意」を選択した場合は…」)、
+            #   実数列の値表現(任意/(実数入力)/(単位)) はその列の値として受け入れる。
+            #   TC側も実数列は「任意」と出力するので、突合キーは「任意」へ寄せる。
+            #   (2026-08-27: ①が書いた注を③が弾いてERRORにしていた自己不整合の是正。
+            #    「任意」以外の不一致は従来どおりERRORなので誤記の検知力は落ちない)
+            if cols[src_g]['numeric'] and (lbl == '任意' or lbl in cols[src_g]['opts']):
+                notes.append({'src_g': src_g, 'src_name': src_name,
+                              'src_choice': '任意', 'targets': targets})
+                continue
             if lbl not in cols[src_g]['opts']:
                 issues.append({
                     'level': 'ERROR',
@@ -322,9 +359,11 @@ def _best_pairs(olds, news, cutoff=0.4):
 def diff_gjoken(g20, g30):
     """列マッチと選択肢差分。
     returns {
-      'col_map': {i20: i30}, 'new_cols': [i30...],
+      'col_map': {i20: i30}, 'new_cols': [i30...], 'del_cols': [i20...],
       'choice_diffs': {i20: {'renames': {old:new}, 'dels': [old], 'adds': [new]}},
-    }"""
+    }
+    del_cols = 30で対応列が見つからなかった20の列(=条件そのものの削除)。
+    (2026-08-27 不具合#544444: 削除列が戻り値に無く、TCに残り続けていた)"""
     names20 = [c['name'] for c in g20['cols']]
     names30 = [c['name'] for c in g30['cols']]
     pairs, removed, added = _best_pairs(names20, names30, cutoff=0.5)
@@ -340,6 +379,7 @@ def diff_gjoken(g20, g30):
                     used30.add(i30)
                     break
     new_cols = [i for i in range(len(names30)) if i not in used30]
+    del_cols = [i for i in range(len(names20)) if i not in col_map]
     choice_diffs = {}
     for i20, i30 in col_map.items():
         c20, c30 = g20['cols'][i20], g30['cols'][i30]
@@ -349,7 +389,8 @@ def diff_gjoken(g20, g30):
         renames = {o: nw for o, nw in pairs if o != nw}
         if renames or dels or adds:
             choice_diffs[i20] = {'renames': renames, 'dels': dels, 'adds': adds}
-    return {'col_map': col_map, 'new_cols': new_cols, 'choice_diffs': choice_diffs}
+    return {'col_map': col_map, 'new_cols': new_cols, 'del_cols': del_cols,
+            'choice_diffs': choice_diffs}
 
 
 def _note_key(g, nt):
@@ -695,6 +736,11 @@ def insert_new_columns(rows, g30, diffs, col_map_20to30, g20, added_labels,
         gates = [(g30['cols'][nt['src_g']]['name'], nt['src_choice'])
                  for nt in g30['notes'] if i30 in nt['targets']]
 
+        # 差分行が1件も無い場合(=新規列以外に改定が無い。条件が丸ごと入れ替わった等)は
+        #   回帰行しか無く、展開しないと新規列の選択肢を1つも網羅できない → 展開を許す。
+        #   (2026-08-27 不具合#544444「鉄枠固定ボルト材料費」: TCが1件しか出なかった)
+        has_sabun = any(str(r[1]).strip() == '差分' for r in data if len(r) > 1)
+
         new_data = []
         for row in data:
             row = list(row)
@@ -726,7 +772,7 @@ def insert_new_columns(rows, g30, diffs, col_map_20to30, g20, added_labels,
                         cur = str(row[kansatsu_i]).strip()
                         row[kansatsu_i] = (cur + '\n' if cur else '') + note
                 new_data.append(row)
-            elif kind == '回帰':
+            elif kind == '回帰' and has_sabun:
                 # 状態戻し回帰TCは展開しない(先頭選択肢)
                 row.insert(ins, opts[0])
                 _mark_new_choice(row, col, opts[0], kansatsu_i, kikaku_i, exp_idx, ins)
@@ -1071,6 +1117,71 @@ def add_gate_branch_rows(rows, g20, g30):
     return out
 
 
+def drop_deleted_condition_columns(rows, g20, g30, diffs):
+    """改修後G条件(30)で削除された条件列をTCから落とす
+    (2026-08-27 不具合#544444「鉄枠固定ボルト材料費」)。
+
+    ③は「改定前JSON＋差分」の合成でTCを作るため、改定で条件そのものが消えた列
+    (例: 蓋区分 が廃止され ロックボルト(M-16) の形状 に置き換わった)が
+    改定前フローのまま残り、改修後には存在しない条件がTCに出てしまう。
+    reconcile_columns_with_g30 の対(=30を正として「足す」の逆で「引く」)。
+
+    落とすのは diff_gjoken が del_cols と判定した列(=20にあり30に対応が無い)のみ。
+    30に同名列がある場合は安全側で残す。列を落とした結果TCが完全重複したら統合する
+    (削除された条件がvary軸だった場合に同じ行が並ぶため)。"""
+    if not rows or not diffs.get('del_cols'):
+        return rows
+    names30 = {c.get('name') for c in g30.get('cols', [])}
+    cols20 = g20.get('cols', [])
+    targets = {cols20[i]['name'] for i in diffs['del_cols']
+               if 0 <= i < len(cols20) and cols20[i].get('name')}
+    targets -= names30
+    if not targets:
+        return rows
+    header = rows[0]
+    meta = set(_LEAD_COLS) | set(_TAIL_COLS)
+
+    def norm_hdr(h):
+        return re.sub(r'\(固定\)$', '', str(h)).strip()
+    drop = {i for i, h in enumerate(header)
+            if h not in meta and not str(h).startswith('期待:')
+            and norm_hdr(h) in targets}
+    if not drop:
+        return rows
+    print('【削除条件の列をTCから除去】%s' % sorted(norm_hdr(header[i]) for i in drop))
+    # 削除の検証観点を付与(既存の「削除された選択肢が表示されないこと」と同書式)。
+    #   列を落としただけでは「条件が消えたこと」を確かめるTCが1件も無くなるため。
+    ki = header.index('選択肢の適切さ確認') if '選択肢の適切さ確認' in header else None
+    if ki is not None:
+        gone = sorted(norm_hdr(header[i]) for i in drop)
+        note = ('条件削除\n・削除された条件(%s)が表示されないこと' % '、'.join(gone))
+        for r in rows[1:]:
+            if not r or not str(r[0]).startswith('TC'):
+                continue
+            while len(r) <= ki:
+                r.append('')
+            if note not in str(r[ki]):
+                cur = str(r[ki]).strip()
+                r[ki] = (cur + '\n' if cur else '') + note
+    keep = [i for i in range(len(header)) if i not in drop]
+    out = [[r[i] if i < len(r) else '' for i in keep] for r in rows]
+    # 重複TC行の統合(テストIDを除いて全一致なら1行に)
+    dedup = [out[0]]
+    seen = set()
+    for r in out[1:]:
+        if not r or not str(r[0]).startswith('TC'):
+            dedup.append(r)
+            continue
+        key = tuple(r[1:])
+        if key in seen:
+            continue
+        seen.add(key)
+        dedup.append(r)
+    for n, r in enumerate([x for x in dedup[1:] if x and str(x[0]).startswith('TC')], 1):
+        r[0] = 'TC-%03d' % n
+    return dedup
+
+
 def reconcile_columns_with_g30(rows, g30):
     """改修後G条件(30)にあってTCに無い条件列を補う(2026-07-08 運用者フィードバック:
     TCの条件列は改修後G条件を正とし、(注)で不要な行だけ「-」)。
@@ -1191,6 +1302,38 @@ def drop_unused_condition_columns(rows):
         return rows
     keep = [i for i in range(len(header)) if i not in drop]
     return [[r[i] if i < len(r) else '' for i in keep] for r in rows]
+
+
+def drop_placeholder_kanten(rows):
+    """回帰観点の埋め草を、実質的な観点が付いた行から取り除く
+    (2026-08-27 運用FB「追加条件の行に『商品と変わっていないこと』と出るのはおかしい」)。
+
+    「・選択肢が商品(現行版)と変わっていないこと」は step3(generate_csv.py FB②)が
+    「この行には確認事項が無い」ときに置く埋め草。③はその後段で新規列・条件削除・
+    ゲート改定の観点を同じセルへ追記するため、「観点ゼロ」の前提が崩れた行に
+    埋め草だけが残り矛盾する。最終段で、他に実質的な観点がある行のみ埋め草を落とす。
+    埋め草しか無い行(本来の回帰TC)はそのまま残す。"""
+    if not rows:
+        return rows
+    header = rows[0]
+    if '選択肢の適切さ確認' not in header:
+        return rows
+    ki = header.index('選択肢の適切さ確認')
+    n = 0
+    for r in rows[1:]:
+        if not r or not str(r[0]).startswith('TC') or ki >= len(r):
+            continue
+        lines = str(r[ki]).split('\n')
+        if not any(x.strip() == REGRESSION_KANTEN for x in lines):
+            continue
+        rest = [x for x in lines if x.strip() and x.strip() != REGRESSION_KANTEN]
+        if not rest:
+            continue          # 埋め草しか無い = 本来の回帰行 → 残す
+        r[ki] = '\n'.join(rest)
+        n += 1
+    if n:
+        print('【回帰観点の埋め草を除去】%d行(他に確認観点があるため)' % n)
+    return rows
 
 
 def reorder_by_g30(rows, g30):
@@ -1480,6 +1623,8 @@ def run(csv20, csv30, old_json, out_dir=None):
         print(f"  {g20['cols'][i20]['name']}: 変更={d['renames']} 削除={d['dels']} 追加={d['adds']}")
     for i30 in diffs['new_cols']:
         print(f"  新規列: {g30['cols'][i30]['name']} 選択肢={g30['cols'][i30]['opts']}")
+    for i20 in diffs.get('del_cols', []):
+        print(f"  削除列: {g20['cols'][i20]['name']} 選択肢={g20['cols'][i20]['opts']}")
 
     print('【改定前JSON解析(列⇔質問No)】')
     analysis = gen_gjoken.analyze(old_json)
@@ -1540,9 +1685,11 @@ def run(csv20, csv30, old_json, out_dir=None):
     out = apply_g30_codes(out, g30)
     out = add_gate_branch_rows(out, g20, g30)
     out = apply_g30_gating(out, g30)
+    out = drop_deleted_condition_columns(out, g20, g30, diffs)
     out = reconcile_columns_with_g30(out, g30)
     out = drop_unused_condition_columns(out)
     out = reorder_by_g30(out, g30)
+    out = drop_placeholder_kanten(out)
     BugakariJSON.write_csv(out, s3)
     n = len(out) - 1
     print(f'③改定後TC叩き台 生成完了: {s3}  (TC {n}件 / 列 {len(out[0])})')
