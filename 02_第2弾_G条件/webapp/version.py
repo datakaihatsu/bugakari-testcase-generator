@@ -12,6 +12,6 @@ version.py ― 配布ツールのバージョン定義（唯一の正）
   PATCH … 不具合修正・生成ロジックの補正
 """
 
-APP_VERSION = '1.1.1'
-BUILD_DATE = '2026-08-27'          # YYYY-MM-DD（配布zipを作った日）
+APP_VERSION = '1.1.2'
+BUILD_DATE = '2026-08-31'          # YYYY-MM-DD（配布zipを作った日）
 VERSION_LABEL = 'v%s (%s)' % (APP_VERSION, BUILD_DATE)

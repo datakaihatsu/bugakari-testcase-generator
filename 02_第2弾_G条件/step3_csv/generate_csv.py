@@ -35,7 +35,17 @@ from flow_walker import FlowWalker
 S_VARS = ['S1', 'S2', 'S3', 'S4', 'S5']
 
 
+class CombinationExplosionError(RuntimeError):
+    """vary軸の組合せが縮退後も上限を超えた(想定外の大規模工種)。
+    無限に近い計算でUIが固まるのを防ぎ、エラーとして返すための例外。"""
+
+
 class ColumnTCGenerator:
+
+    # 全組合せ(直積)方式を許す上限。超えたら「基準+1軸ずつ変更」方式に縮退する。
+    #   既存の運用合格工種は最大でも数百件規模(回帰ベースライン実測: 最大138TC)
+    #   なので、この上限では既存工種の出力は一切変わらない。
+    MAX_FULL_COMBOS = 1000
 
     def __init__(self, plan_csv_path, new_json_path, old_json_path=None,
                  ref_json_path=None):
@@ -827,6 +837,81 @@ class ColumnTCGenerator:
             print(f'  [multi-step到達] {len(specs)}件の到達用comboを追加(方針言及軸)')
         return default_rows, specs
 
+    def _build_combos(self, vary_row_lists):
+        """vary軸の組合せ(combo)リストを構築する。3段構えの爆発対策付き。
+
+        (1) 軸統合: 質問名と選択肢表示列が完全一致する軸は「実体が同じ質問の
+            フロー上の別コピー」(例 6435-36 使用鉄筋の単位選択×9)とみなし、
+            連動して同じ行を選ぶ1グループに束ねる。存在しない組合せ
+            (1箇所目=t・2箇所目=m 等)を最初から作らない。
+        (2) 直積上限: グループ直積の件数を材料化前に計算し、MAX_FULL_COMBOS を
+            超える場合は「基準combo(各軸の先頭行=既定代表)+1軸(グループ)ずつ
+            変更」方式に縮退する。全選択肢が最低1回は選ばれるため、到達質問・
+            選択肢の網羅(=G条件表の内容)は直積と変わらない。
+        (3) 最終防壁: 縮退後もなお上限を超える場合は CombinationExplosionError
+            を送出し、フリーズせずエラーとして返す。
+
+        戻り値の combo は常に vary_row_lists と同じ長さのタプル(グループの
+        メンバー軸には同じ行番号の行を展開)なので、呼び出し側の既存処理
+        (_tx_axes剪定・reach override・列生成)はそのまま使える。
+        """
+        if not vary_row_lists:
+            return [tuple()]
+
+        # (1) 実体同一軸のグループ化 (キー: 軸名+選択肢表示列。先頭がリーダー)
+        groups = []       # [[axis_idx, ...], ...]
+        group_by_key = {}
+        for i, (ax, rs) in enumerate(vary_row_lists):
+            key = (ax.get('軸名') or '', tuple(r['display'] for r in rs))
+            gi = group_by_key.get(key)
+            if gi is None:
+                group_by_key[key] = len(groups)
+                groups.append([i])
+            else:
+                groups[gi].append(i)
+        merged = [g for g in groups if len(g) > 1]
+        if merged:
+            print('  [軸統合] 実体同一の質問を連動化: ' + ', '.join(
+                f"{vary_row_lists[g[0]][0].get('軸名')}×{len(g)}" for g in merged))
+
+        group_sizes = [len(vary_row_lists[g[0]][1]) for g in groups]
+
+        def _expand(idx_combo):
+            # グループの行番号選択 → 全軸に展開 (メンバーは同じ行番号の行)
+            full = [None] * len(vary_row_lists)
+            for g, ri in zip(groups, idx_combo):
+                for m in g:
+                    full[m] = vary_row_lists[m][1][ri]
+            return tuple(full)
+
+        total = 1
+        for n in group_sizes:
+            total *= max(1, n)
+
+        # (2) 直積上限ガード
+        if total <= self.MAX_FULL_COMBOS:
+            idx_combos = itertools.product(*[range(n) for n in group_sizes])
+            return [_expand(ic) for ic in idx_combos]
+
+        base = tuple(0 for _ in group_sizes)  # 各軸の先頭行=既定代表(_compute_reach_combos と同じ)
+        idx_combos = [base]
+        for gi, n in enumerate(group_sizes):
+            for ri in range(1, n):
+                c = list(base)
+                c[gi] = ri
+                idx_combos.append(tuple(c))
+        print(f'  [組合せ上限] 全組合せ{total}件 > 上限{self.MAX_FULL_COMBOS}件 '
+              f'→ 基準+1軸ずつ変更方式に縮退({len(idx_combos)}件)')
+
+        # (3) 最終防壁: 縮退しても大きすぎるならエラーで返す(フリーズさせない)
+        if len(idx_combos) > self.MAX_FULL_COMBOS:
+            raise CombinationExplosionError(
+                'vary軸の組合せが縮退後も%d件あり上限(%d件)を超えました。'
+                'この工種は現行エンジンの想定外の規模です。'
+                '工種キーと操作内容を開発担当へ連絡してください。'
+                % (len(idx_combos), self.MAX_FULL_COMBOS))
+        return [_expand(ic) for ic in idx_combos]
+
 
     def generate(self):
         # 到達経路探査 (#44/#45 潜水士船): 運転費(Sitsumon014)の「値変更」観点があるのに
@@ -1118,11 +1203,10 @@ class ColumnTCGenerator:
         for _pass in range(2):
             _reach_default_rows, _reach_specs = self._compute_reach_combos(
                 vary_row_lists, forced_rows)
-            # cartesian
-            if vary_row_lists:
-                combos = list(itertools.product(*[rs for _, rs in vary_row_lists]))
-            else:
-                combos = [tuple()]
+            # cartesian (実体同一軸の連動化＋直積上限ガード付き。
+            #   2026-08-31 不具合: 65-546-6435-22 で 2^20 超の直積になり
+            #   「生成中」のままフリーズした対策)
+            combos = self._build_combos(vary_row_lists)
 
             # 選択肢テキスト変更軸が複数あるとき、組合せは「全て既定行」or
             #   「全て最長行」の2通りだけ残す (文字検証は1TCで足りる。

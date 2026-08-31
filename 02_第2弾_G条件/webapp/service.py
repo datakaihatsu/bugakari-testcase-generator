@@ -37,11 +37,19 @@ import io_xlsx
 import gen_gjoken
 import gen_tc_from_gjoken
 
+_ENGINE = os.path.join(_PARENT, 'engine')
+if _ENGINE not in sys.path:
+    sys.path.insert(0, _ENGINE)
+import flow_walker  # 生成の時間上限(組合せ爆発時の最終防壁)を設定するため
+
 DEFAULT_CONFIG = {
     'expcd_path': locate.DEFAULT_EXPCD,
     'bugakari_root': locate.DEFAULT_BUGAKARI,
     'port': 8765,
     'workdir_root': None,  # None → システム一時領域
+    # 生成1回の時間上限(秒)。超過時はエラーを返してスレッドを解放する
+    # (2026-08-31 不具合: 65-546-6435-22 で「生成中」のまま固まった対策)。
+    'gen_timeout_sec': 300,
 }
 
 
@@ -147,6 +155,7 @@ def gen_g(json_path, cfg=None, out_dir=None):
         out['error'] = 'JSONが見つかりません: %s' % json_path
         return out
     try:
+        flow_walker.set_time_budget(cfg.get('gen_timeout_sec', 300))
         wd = out_dir or new_workdir(cfg, 'geng_')
         out['workdir'] = wd
         # label='' → 素の名前「Gaia入力基準表_<工種>(<単位>).csv」
@@ -168,6 +177,8 @@ def gen_g(json_path, cfg=None, out_dir=None):
     except Exception as e:  # noqa: BLE001 UIに返すため広く捕捉
         out['error'] = _fmt_err(e)
         out['log'] += '\n' + traceback.format_exc()
+    finally:
+        flow_walker.set_time_budget(None)
     return out
 
 
@@ -186,6 +197,7 @@ def gen_tc(g20, g30, old_json, cfg=None, out_dir=None):
             out['error'] = '%s が見つかりません: %s' % (label, p)
             return out
     try:
+        flow_walker.set_time_budget(cfg.get('gen_timeout_sec', 300))
         wd = out_dir or new_workdir(cfg, 'gentc_')
         out['workdir'] = wd
         csv20 = _to_csv(g20, wd, '20_G条件.csv')
@@ -206,6 +218,8 @@ def gen_tc(g20, g30, old_json, cfg=None, out_dir=None):
     except Exception as e:  # noqa: BLE001
         out['error'] = _fmt_err(e)
         out['log'] += '\n' + traceback.format_exc()
+    finally:
+        flow_walker.set_time_budget(None)
     return out
 
 
@@ -223,6 +237,7 @@ def gen_tc_new(g30, cfg=None, out_dir=None):
         out['error'] = '改修後G条件が見つかりません: %s' % g30
         return out
     try:
+        flow_walker.set_time_budget(cfg.get('gen_timeout_sec', 300))
         wd = out_dir or new_workdir(cfg, 'gentcnew_')
         out['workdir'] = wd
         # 工種名は元ファイル名から拾う（_to_csv でリネームされる前に）
@@ -242,6 +257,8 @@ def gen_tc_new(g30, cfg=None, out_dir=None):
     except Exception as e:  # noqa: BLE001
         out['error'] = _fmt_err(e)
         out['log'] += '\n' + traceback.format_exc()
+    finally:
+        flow_walker.set_time_budget(None)
     return out
 
 

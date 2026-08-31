@@ -30,6 +30,8 @@ CallBox[i] が i+1 番目の「選択可能行(Visible & not IsFixed)」に対�
 import sys
 import os
 import re
+import time
+import threading
 from decimal import Decimal
 
 sys.path.insert(0, os.path.dirname(__file__))
@@ -37,6 +39,39 @@ from expression import KeisanHyo, ExpressionError, ExternalReferenceError
 
 # Mesho "N=代価表X枚目Y行目" のパターン (代価表行 active/inactive フラグ)
 _DAIKA_ROW_FLAG_PATTERN = re.compile(r'^(\d+(?:\.\d+)?)=代価表(\d+)枚目(\d+)行目$')
+
+
+# ---------------------------------------------------------------------------
+# 生成全体の時間上限 (2026-08-31 不具合: 65-546-6435-22 で組合せ爆発しUIが
+#   「生成中」のまま固まった対策の最終防壁)。
+# 重い処理は必ず walk() を繰り返し呼ぶため、walk() 冒頭で期限超過を検査し
+# 例外で中断する。上限は Web サービス層(webapp/service.py)がリクエスト単位で
+# 設定する。CLI・回帰テストは未設定(無制限)のまま動くので挙動は変わらない。
+# ThreadingHTTPServer で並行リクエストがあり得るため thread-local に持つ。
+# ---------------------------------------------------------------------------
+class GenerationTimeout(RuntimeError):
+    """生成の時間上限超過。UI層でエラー表示してスレッドを解放するための例外。"""
+
+
+_time_budget = threading.local()
+
+
+def set_time_budget(seconds):
+    """現在のスレッドの生成処理に時間上限(秒)を設定する。None/0 で解除。"""
+    _time_budget.deadline = (time.monotonic() + seconds) if seconds else None
+    _time_budget.limit = seconds if seconds else None
+
+
+def check_time_budget():
+    """期限を過ぎていたら GenerationTimeout を送出する。未設定なら何もしない。"""
+    dl = getattr(_time_budget, 'deadline', None)
+    if dl is not None and time.monotonic() > dl:
+        limit = getattr(_time_budget, 'limit', None)
+        raise GenerationTimeout(
+            '生成が時間上限(%s秒)を超えたため中断しました。'
+            '組合せが想定外に多い工種の可能性があります。'
+            '工種キーと操作内容を開発担当へ連絡してください。'
+            % (int(limit) if limit else '?'))
 
 
 class FlowWalker:
@@ -136,6 +171,7 @@ class FlowWalker:
             'scope':              {VarName: Decimal} (最終的なスコープ)
         }
         """
+        check_time_budget()  # 生成全体の時間上限 (webapp から設定。CLIでは無効)
         start = self.find_start()
         if start is None:
             return {'visited_sitsumons': [], 'sit_selections': {}, 'scope': {}}
