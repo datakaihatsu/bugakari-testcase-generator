@@ -235,8 +235,11 @@ def _capture(func, *args, **kwargs):
 
 
 def _fmt_err(e):
-    # 「この歩掛は生成できない」は利用者向けの説明文なので、例外クラス名を付けずそのまま出す
-    if isinstance(e, generate_csv.CombinationExplosionError):
+    # 利用者向けの説明文として書かれた例外は、例外クラス名を付けずそのまま出す
+    #   - CombinationExplosionError: この歩掛は組合せが多すぎて生成できない(v1.2.1)
+    #   - GjokenApplyError: 改修後G条件の変更を改定前JSONへ反映できない(v1.2.2)
+    if isinstance(e, (generate_csv.CombinationExplosionError,
+                      gen_tc_from_gjoken.GjokenApplyError)):
         return str(e)
     return '%s: %s' % (type(e).__name__, e)
 

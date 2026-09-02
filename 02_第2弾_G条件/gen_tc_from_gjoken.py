@@ -366,7 +366,14 @@ def diff_gjoken(g20, g30):
     (2026-08-27 不具合#544444: 削除列が戻り値に無く、TCに残り続けていた)"""
     names20 = [c['name'] for c in g20['cols']]
     names30 = [c['name'] for c in g30['cols']]
-    pairs, removed, added = _best_pairs(names20, names30, cutoff=0.5)
+    # 条件名は **完全一致のみ** 同じ条件とみなす(2026-09-02 ユーザ決定)。
+    #   以前は類似度0.5+接頭辞ボーナス(B-7)で改名を検出していたが、文字だけでは
+    #   「同じ物の名前直し」と「別物への置き換え」を判別できず、改名扱いのまま選択肢を
+    #   全入替すると擬似JSONの選択肢が0行になって落ちた(鉄枠固定ボルト材料費 160-1722:
+    #   「蓋区分」→「○区分」)。名前が変わった列は別条件(削除列+新規列)として扱い、
+    #   テストは安全側(全選択肢網羅で多く出る)に振る。不要なTCは人が削れる。
+    #   影響(回帰35工種の実測): 13・27 の注記追加型改名が別条件扱いになる(TC +5行)。他は不変。
+    pairs = [(n, n) for n in names20 if n in names30]
     name_map = dict(pairs)
     col_map = {}
     used30 = set()
@@ -547,8 +554,17 @@ def _fix_default_row_for_marker_move(data, sits, renames):
                           f"DefaultRowID {old_rid}→{new_rid}")
 
 
+class GjokenApplyError(RuntimeError):
+    """改修後G条件の変更を改定前JSONへ適用できなかった(利用者に理由を示して止めるための例外)。
+    黙って壊れた擬似JSONで先へ進み IndexError 等になるのを防ぐ(2026-09-02)。"""
+
+
 def build_pseudo_json(json_path, g20_analysis, diffs, g20, g30, out_path):
-    """改定前JSONにG条件差分(既存質問分)を適用した擬似改定後JSONを作る。"""
+    """改定前JSONにG条件差分(既存質問分)を適用した擬似改定後JSONを作る。
+
+    適用順は **追加 → 削除・文字変更**。追加は「最も似た既存選択肢の行を複製」して作るため、
+    削除を先にすると複製元が消えて追加できない(2026-09-02 不具合。同名列で選択肢を全入替した
+    場合が該当)。追加できなかった選択肢が残れば GjokenApplyError で止める。"""
     bj, gen, g_list, _ = g20_analysis
     data = json.load(open(json_path, encoding='utf-8-sig'))
     # 20のCSV列名 → analyze g_list の対応 (名前で引く。位置フォールバック)
@@ -577,7 +593,8 @@ def build_pseudo_json(json_path, g20_analysis, diffs, g20, g30, out_path):
         glist = cands if cands else ([g_list[i20]] if i20 < len(g_list) else [])
         adds = []
         for new_lbl in d['adds']:
-            # 追加選択肢の複製元 = 最類似の既存選択肢 (rename適用後のラベルで引く)
+            # 追加選択肢の複製元 = 最類似の既存選択肢。追加は削除・文字変更より先に
+            # 適用するので、複製元は改定前(rename前)のラベルで引く。
             src = None
             best = -1.0
             for o in g20['cols'][i20]['opts']:
@@ -585,7 +602,7 @@ def build_pseudo_json(json_path, g20_analysis, diffs, g20, g30, out_path):
                 if r > best:
                     best, src = r, o
             if src:
-                adds.append((new_lbl, d['renames'].get(src, src)))
+                adds.append((new_lbl, src))
         # 削除/文字変更は全sitへ適用。追加(複製注入)は基準ルートで到達している
         #   sitに限定する(B-3: G条件は系列マージで「どの系列に追加か」を失うため、
         #   99が差分行を作る基準系列に合わせる。02大型ブレーカ/40小型不整地)。
@@ -599,6 +616,29 @@ def build_pseudo_json(json_path, g20_analysis, diffs, g20, g30, out_path):
             first = glist[0]
             if first.get('sits'):
                 reached = {first['sits'][0]}
+        # (1) 追加(複製注入) — 複製元が残っているうちに行う
+        applied_new = set()
+        if adds:
+            for g in glist:
+                for sit in g['sits']:
+                    if reached and sit not in reached:
+                        continue
+                    got = _edit_sit(data, sit, [], {}, adds)
+                    applied_new.update(got)
+                    added_labels.extend(got)
+            if not applied_new:  # 到達sitに注入できなければ全sitへフォールバック
+                for g in glist:
+                    for sit in g['sits']:
+                        got = _edit_sit(data, sit, [], {}, adds)
+                        applied_new.update(got)
+                        added_labels.extend(got)
+            missing = [nl for nl, _src in adds if nl not in applied_new]
+            if missing:
+                raise GjokenApplyError(
+                    '改修後G条件の条件「%s」に追加された選択肢 %s を、改定前の質問へ反映できませんでした'
+                    '（複製元となる既存の選択肢が見つかりません）。条件名・選択肢の書き方を改定前と'
+                    '見比べてご確認ください。' % (name, '・'.join('「%s」' % m for m in missing)))
+        # (2) 削除・文字変更
         all_sits = []
         for g in glist:
             for sit in g['sits']:
@@ -607,21 +647,6 @@ def build_pseudo_json(json_path, g20_analysis, diffs, g20, g30, out_path):
                 all_sits.append(sit)
         if d['renames']:
             _fix_default_row_for_marker_move(data, all_sits, d['renames'])
-        add_ok = False
-        if adds:
-            for g in glist:
-                for sit in g['sits']:
-                    if reached and sit not in reached:
-                        continue
-                    got = _edit_sit(data, sit, [], {}, adds)
-                    if got:
-                        add_ok = True
-                    added_labels.extend(got)
-            if not add_ok:  # 到達sitに注入できなければ全sitへフォールバック
-                for g in glist:
-                    for sit in g['sits']:
-                        got = _edit_sit(data, sit, [], {}, adds)
-                        added_labels.extend(got)
     json.dump(data, open(out_path, 'w', encoding='utf-8'), ensure_ascii=False)
     return sorted(set(added_labels))
 

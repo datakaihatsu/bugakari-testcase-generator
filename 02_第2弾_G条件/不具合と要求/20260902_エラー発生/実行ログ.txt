@@ -1,0 +1,20 @@
+Traceback (most recent call last):
+  File "C:\Users\nishi\Desktop\Gaia歩掛テストケースツール\app\webapp\service.py", line 206, in gen_tc
+    s3, log = _capture(gen_tc_from_gjoken.run, csv20, csv30, old_json, wd)
+              ~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\nishi\Desktop\Gaia歩掛テストケースツール\app\webapp\service.py", line 80, in _capture
+    result = func(*args, **kwargs)
+  File "C:\Users\nishi\Desktop\Gaia歩掛テストケースツール\app\gen_tc_from_gjoken.py", line 1669, in run
+    run_step3(s2, pseudo, s3, old_json)
+    ~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\nishi\Desktop\Gaia歩掛テストケースツール\app\step3_csv\generate_csv.py", line 1628, in run
+    rows = gen.generate()
+  File "C:\Users\nishi\Desktop\Gaia歩掛テストケースツール\app\step3_csv\generate_csv.py", line 1204, in generate
+    _reach_default_rows, _reach_specs = self._compute_reach_combos(
+                                        ~~~~~~~~~~~~~~~~~~~~~~~~~~^
+        vary_row_lists, forced_rows)
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\nishi\Desktop\Gaia歩掛テストケースツール\app\step3_csv\generate_csv.py", line 792, in _compute_reach_combos
+    default_rows = [rs[0] for _, rs in vary_row_lists]
+                    ~~^^^
+IndexError: list index out of range
