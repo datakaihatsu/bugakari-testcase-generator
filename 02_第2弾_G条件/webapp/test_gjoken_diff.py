@@ -171,5 +171,55 @@ class TestIssue20260902EndToEnd(unittest.TestCase):
         self.assertNotIn('IndexError', r['error'])
 
 
+_K12 = os.path.join(_PARENT, '..', '工種別', '12_619272_重建設機械分解組立', 'input')
+_K12_OLD = os.path.join(_K12, '32-6.20250401.20250401.json')
+_K12_NEW = os.path.join(_K12, '32-6.20260401.20260401.json')
+
+
+@unittest.skipUnless(os.path.exists(_K12_OLD) and os.path.exists(_K12_NEW), '12 実データ未配置')
+class TestPlanCTextChangeObservation(unittest.TestCase):
+    """案C (2026-09-02): 文字修正のみの軸の行には「文字修正後の選択肢を選んだとき、代価行・数量・
+    単価が積算基準および設計書どおりであること」を必ず添える。12 重建設機械分解組立は
+    表記統一14件の中に 1.4m3→1.5m3 の実体変更が混在する実例。"""
+
+    @classmethod
+    def setUpClass(cls):
+        import csv
+        import tempfile
+        import gen_gjoken
+        work = tempfile.mkdtemp(prefix='planc_')
+        with contextlib.redirect_stdout(io.StringIO()):
+            c20 = gen_gjoken.build_g(_K12_OLD, os.path.join(work, '20'))
+            c30 = gen_gjoken.build_g(_K12_NEW, os.path.join(work, '30'))
+            out = gj.run(c20, c30, _K12_OLD, os.path.join(work, 'out'))
+        raw = open(out, 'rb').read()
+        for enc in ('utf-8-sig', 'cp932'):
+            try:
+                txt = raw.decode(enc)
+                break
+            except UnicodeDecodeError:
+                continue
+        cls.rows = list(csv.reader(io.StringIO(txt)))
+        cls.col = cls.rows[0].index('選択肢の適切さ確認')
+
+    def test_text_change_rows_carry_content_check(self):
+        cells = [r[self.col] for r in self.rows[1:] if '選択肢文字修正' in r[self.col]]
+        self.assertTrue(cells, '文字修正行が無い')
+        for c in cells:
+            self.assertIn('文字修正後の選択肢を選んだとき', c)
+            self.assertIn('積算基準および設計書どおり', c)
+            self.assertIn('文字だけの修正か、内容の変更かを確認', c)
+
+    def test_other_rows_do_not_carry_it(self):
+        others = [r[self.col] for r in self.rows[1:] if '選択肢文字修正' not in r[self.col]]
+        for c in others:
+            self.assertNotIn('文字修正後の選択肢を選んだとき', c)
+
+    def test_row_and_column_counts_unchanged(self):
+        # 案C は観点文だけを変える: 12 は TC 3 行 / 14 列 のまま
+        self.assertEqual(len(self.rows) - 1, 3)
+        self.assertEqual(len(self.rows[0]), 14)
+
+
 if __name__ == '__main__':
     unittest.main(verbosity=2)
