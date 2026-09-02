@@ -36,6 +36,7 @@ import locate
 import io_xlsx
 import gen_gjoken
 import gen_tc_from_gjoken
+import generate_csv  # CombinationExplosionError(上限超=生成不可)の表示整形用
 
 _ENGINE = os.path.join(_PARENT, 'engine')
 if _ENGINE not in sys.path:
@@ -234,6 +235,9 @@ def _capture(func, *args, **kwargs):
 
 
 def _fmt_err(e):
+    # 「この歩掛は生成できない」は利用者向けの説明文なので、例外クラス名を付けずそのまま出す
+    if isinstance(e, generate_csv.CombinationExplosionError):
+        return str(e)
     return '%s: %s' % (type(e).__name__, e)
 
 

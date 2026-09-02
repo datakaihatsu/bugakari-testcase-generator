@@ -36,16 +36,19 @@ S_VARS = ['S1', 'S2', 'S3', 'S4', 'S5']
 
 
 class CombinationExplosionError(RuntimeError):
-    """vary軸の組合せが縮退後も上限を超えた(想定外の大規模工種)。
-    無限に近い計算でUIが固まるのを防ぎ、エラーとして返すための例外。"""
+    """vary軸の全組合せが上限を超えた(本ツールの守備範囲外の大規模工種)。
+    無限に近い計算でUIが固まるのを防ぎ、「この歩掛は生成できない」と明示して返すための例外。
+    (2026-09-02 方針: 縮退して出すのではなく、出せないと返す。理由は _build_combos 参照)"""
 
 
 class ColumnTCGenerator:
 
-    # 全組合せ(直積)方式を許す上限。超えたら「基準+1軸ずつ変更」方式に縮退する。
-    #   既存の運用合格工種は最大でも数百件規模(回帰ベースライン実測: 最大138TC)
-    #   なので、この上限では既存工種の出力は一切変わらない。
-    MAX_FULL_COMBOS = 1000
+    # 全組合せ(直積)方式を許す上限。超えたら CombinationExplosionError で「生成できない」と返す。
+    #   3,000 の根拠(2026-09-02 実測): 回帰35工種の最大は 43 捨石本均し の 1,200 件(全組合せで
+    #   3.8〜10.5秒)。v1.1.2 の 1,000 は計測なしの値で、この 43 を巻き込んでいた。
+    #   一方 65-546-6435-22 消波ブロック製作は軸統合後も 4,096〜16,384 件(1combo 約0.3秒
+    #   =20分超)で、これは守備範囲外としてエラーで返す。DB無作為500工種では 3,000 超は 3.2%。
+    MAX_FULL_COMBOS = 3000
 
     def __init__(self, plan_csv_path, new_json_path, old_json_path=None,
                  ref_json_path=None):
@@ -838,18 +841,23 @@ class ColumnTCGenerator:
         return default_rows, specs
 
     def _build_combos(self, vary_row_lists):
-        """vary軸の組合せ(combo)リストを構築する。3段構えの爆発対策付き。
+        """vary軸の組合せ(combo)リストを構築する。組合せ爆発対策付き。
 
         (1) 軸統合: 質問名と選択肢表示列が完全一致する軸は「実体が同じ質問の
             フロー上の別コピー」(例 6435-36 使用鉄筋の単位選択×9)とみなし、
             連動して同じ行を選ぶ1グループに束ねる。存在しない組合せ
             (1箇所目=t・2箇所目=m 等)を最初から作らない。
         (2) 直積上限: グループ直積の件数を材料化前に計算し、MAX_FULL_COMBOS を
-            超える場合は「基準combo(各軸の先頭行=既定代表)+1軸(グループ)ずつ
-            変更」方式に縮退する。全選択肢が最低1回は選ばれるため、到達質問・
-            選択肢の網羅(=G条件表の内容)は直積と変わらない。
-        (3) 最終防壁: 縮退後もなお上限を超える場合は CombinationExplosionError
-            を送出し、フリーズせずエラーとして返す。
+            超える場合は CombinationExplosionError を送出して「この歩掛は生成
+            できない」と返す(フリーズさせない)。
+
+        ★v1.1.2 で入れた「基準combo+1軸ずつ変更」への縮退は 2026-09-02 に廃止した。
+          縮退サンプルでは各非基準選択肢が combo 1件にしか現れず、G条件表の(注)
+          「Gx=v を選ぶと Gy は入力不要」を 1 サンプルから帰納してしまい、実際には
+          必要な条件を「不要」と誤記する(43 捨石本均し で実証・全組合せなら一致)。
+          列・選択肢の網羅は保たれるため劣化チェックでも検知できない。
+          方針(ユーザ決定): 普通サイズの歩掛が正しく出ることを優先し、上限超の
+          歩掛は縮退せず「出せない」と返す。
 
         戻り値の combo は常に vary_row_lists と同じ長さのタプル(グループの
         メンバー軸には同じ行番号の行を展開)なので、呼び出し側の既存処理
@@ -888,28 +896,16 @@ class ColumnTCGenerator:
         for n in group_sizes:
             total *= max(1, n)
 
-        # (2) 直積上限ガード
-        if total <= self.MAX_FULL_COMBOS:
-            idx_combos = itertools.product(*[range(n) for n in group_sizes])
-            return [_expand(ic) for ic in idx_combos]
-
-        base = tuple(0 for _ in group_sizes)  # 各軸の先頭行=既定代表(_compute_reach_combos と同じ)
-        idx_combos = [base]
-        for gi, n in enumerate(group_sizes):
-            for ri in range(1, n):
-                c = list(base)
-                c[gi] = ri
-                idx_combos.append(tuple(c))
-        print(f'  [組合せ上限] 全組合せ{total}件 > 上限{self.MAX_FULL_COMBOS}件 '
-              f'→ 基準+1軸ずつ変更方式に縮退({len(idx_combos)}件)')
-
-        # (3) 最終防壁: 縮退しても大きすぎるならエラーで返す(フリーズさせない)
-        if len(idx_combos) > self.MAX_FULL_COMBOS:
+        # (2) 直積上限ガード: 超えたら縮退せず「出せない」と返す
+        if total > self.MAX_FULL_COMBOS:
+            print(f'  [組合せ上限] 全組合せ{total}件 > 上限{self.MAX_FULL_COMBOS}件 → 生成中止')
             raise CombinationExplosionError(
-                'vary軸の組合せが縮退後も%d件あり上限(%d件)を超えました。'
-                'この工種は現行エンジンの想定外の規模です。'
-                '工種キーと操作内容を開発担当へ連絡してください。'
-                % (len(idx_combos), self.MAX_FULL_COMBOS))
+                'この歩掛は条件の組合せが多すぎるため、本ツールでは生成できません'
+                '（条件の組合せ %s 件 ／ 上限 %s 件）。'
+                '通常サイズの歩掛を対象としたツールのため、この歩掛は対象外です。'
+                '必要な場合は工種キーを開発担当へお知らせください。'
+                % (format(total, ','), format(self.MAX_FULL_COMBOS, ',')))
+        idx_combos = itertools.product(*[range(n) for n in group_sizes])
         return [_expand(ic) for ic in idx_combos]
 
 

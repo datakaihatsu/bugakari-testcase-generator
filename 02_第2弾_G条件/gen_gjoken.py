@@ -34,7 +34,7 @@ for p in ('engine', 'step2_proposals', 'step3_csv'):
 from bugakari_json import BugakariJSON                   # noqa: E402
 from generate_proposals_new import run as run_plan_new   # noqa: E402
 from generate_proposals import TestPlanGenerator         # noqa: E402
-from generate_csv import ColumnTCGenerator               # noqa: E402
+from generate_csv import ColumnTCGenerator, CombinationExplosionError  # noqa: E402
 
 
 def _mk(oi):
@@ -417,7 +417,17 @@ def analyze(json_path):
     plan_backup = open(plan_csv, encoding='cp932', errors='replace').read()
     if _promote_reselectable_for_coverage(plan_csv, bj, gen, rows):
         gen2 = ColumnTCGenerator(plan_csv, json_path)
-        rows2 = gen2.generate()
+        try:
+            rows2 = gen2.generate()
+        except CombinationExplosionError as e:
+            # 昇格で軸が増えて上限超になった場合は、補完を諦めて元の結果(全組合せ)を使う。
+            # 補完は「増える方向のみ許容」の任意拡張なので、出せないなら無い方が正しい
+            # (2026-09-02: 43 捨石本均し 600→1,200 のような境界例への備え)。
+            with open(plan_csv, 'w', encoding='cp932', newline='') as f:
+                f.write(plan_backup)
+            print('  [網羅性補完] 昇格後の組合せが上限超 → 昇格を破棄(元の結果を使用): %s' % e)
+            gen._rows_cache = rows
+            return bj, gen, g_list, notes
         g2, n2 = _derive_glist(bj, gen2, rows2, json_path)
         name2opts = {}
         for g in g2:

@@ -1,12 +1,20 @@
 # -*- coding: utf-8 -*-
 """
-組合せ爆発ガードのテスト (2026-08-31 不具合: 65-546-6435-22 消波ブロック製作)
+組合せ爆発ガードのテスト
 
-3段構えの対策を検証する:
+経緯:
+  2026-08-31 (v1.1.2) 65-546-6435-22 消波ブロック製作で直積 2^20 超 → 「生成中」のまま固まる。
+    対策 = 軸統合 + 直積上限超で「基準+1軸ずつ変更」へ縮退 + 時間上限。
+  2026-09-02 (v1.2.1) 縮退は廃止。縮退サンプルでは G条件表の(注)「Gx=v なら Gy 不要」を
+    1 サンプルから帰納してしまい、必要な条件を「不要」と誤記する(43 捨石本均し で実証)。
+    方針(ユーザ決定): 普通サイズの歩掛が正しく出ることを優先し、上限超は
+    CombinationExplosionError で「この歩掛は生成できない」と返す。上限は実測に基づき 3,000。
+
+検証:
   1. 軸統合   : 実体同一(同名+同選択肢)の軸を連動化 → 直積の桁を減らす
-  2. 直積上限 : MAX_FULL_COMBOS 超過で「基準+1軸ずつ変更」方式に縮退
-  3. 最終防壁 : 縮退後も超過なら CombinationExplosionError /
-               時間上限超過で flow_walker.GenerationTimeout
+  2. 直積上限 : MAX_FULL_COMBOS 以内は全組合せ / 超過は CombinationExplosionError(縮退しない)
+  3. 時間上限 : flow_walker.GenerationTimeout
+  4. 網羅性補完(gen2)が上限超のときは補完を破棄して元の結果を使う(実データ 43 で確認)
 """
 
 import io
@@ -60,9 +68,7 @@ class TestAxisBundling(unittest.TestCase):
         combos = _build(vrl)
         self.assertEqual(len(combos), 2)
         for cb in combos:
-            # メンバーはリーダーと同じ行番号(=同じ表示)を選ぶ
             self.assertEqual(cb[0]['display'], cb[1]['display'])
-            # 各軸には自分自身の row オブジェクト(sit_no)が入る
             self.assertEqual(cb[0]['sit_no'], 1)
             self.assertEqual(cb[1]['sit_no'], 2)
 
@@ -77,33 +83,45 @@ class TestAxisBundling(unittest.TestCase):
 
 
 class TestProductCap(unittest.TestCase):
+    def test_cap_value_is_3000(self):
+        # 実測に基づく値(43 捨石本均し=1,200 を通し、消波ブロック=4,096 超を止める)
+        self.assertEqual(ColumnTCGenerator.MAX_FULL_COMBOS, 3000)
+
     def test_full_product_under_cap(self):
         vrl = [(_ax(i, f'軸{i}'), _rows(['A', 'B'], i)) for i in range(3)]
         self.assertEqual(len(_build(vrl)), 8)  # 2^3 は上限内 → 全組合せ
 
-    def test_one_hot_fallback_over_cap(self):
-        # 2^12=4096 > cap 100 → 基準1 + 各軸1変化(12) = 13件
+    def test_exactly_at_cap_is_full_product(self):
+        vrl = [(_ax(i, f'軸{i}'), _rows(['A', 'B'], i)) for i in range(3)]
+        self.assertEqual(len(_build(vrl, cap=8)), 8)  # 上限ちょうどは許容
+
+    def test_over_cap_raises_not_reduces(self):
+        # 2^12=4096 > cap 100 → 縮退せず「生成できない」で返す
         vrl = [(_ax(i, f'軸{i}'), _rows(['A', 'B'], i)) for i in range(12)]
-        combos = _build(vrl, cap=100)
-        self.assertEqual(len(combos), 13)
-        # 基準combo は全軸先頭行
-        self.assertTrue(all(r['display'] == 'A' for r in combos[0]))
-        # 全選択肢が最低1回は登場する (到達網羅=G条件表の内容は不変)
-        for i in range(12):
-            self.assertTrue(any(cb[i]['display'] == 'B' for cb in combos))
+        with self.assertRaises(CombinationExplosionError) as cm:
+            _build(vrl, cap=100)
+        msg = str(cm.exception)
+        self.assertIn('生成できません', msg)
+        self.assertIn('4,096', msg)   # 件数を利用者に見せる
+        self.assertIn('100', msg)
 
     def test_bundling_then_cap_like_6435_36(self):
-        # 実不具合の縮図: 同一軸x9 + 独立軸x12 → 統合で 2^13、なお超過 → 縮退
+        # 実不具合の縮図: 同一軸x9 + 独立軸x12 → 統合で 2^13=8192、なお超過 → エラー
         vrl = [(_ax(i, '単位選択'), _rows(['t', 'm'], i)) for i in range(9)]
         vrl += [(_ax(100 + i, f'軸{i}'), _rows(['A', 'B'], 100 + i))
                 for i in range(12)]
-        combos = _build(vrl, cap=100)
-        self.assertEqual(len(combos), 1 + 13)  # グループ13(統合1+独立12)が各1変化
-
-    def test_explosion_error_when_one_hot_still_over(self):
-        vrl = [(_ax(i, f'軸{i}'), _rows(['A', 'B'], i)) for i in range(30)]
         with self.assertRaises(CombinationExplosionError):
-            _build(vrl, cap=10)  # 2^30 → 縮退31件 > 10
+            _build(vrl, cap=100)
+        # 統合で上限内に収まれば全組合せで出る (2^13=8192 <= 10000)
+        self.assertEqual(len(_build(vrl, cap=10000)), 8192)
+
+    def test_1200_like_43_passes_default_cap(self):
+        # 43 捨石本均し 相当(直積1,200)は既定上限で全組合せになる
+        vrl = [(_ax(i, f'軸{i}'), _rows(['A', 'B'], i)) for i in range(4)]        # 16
+        vrl += [(_ax(10 + i, f'軸x{i}'), _rows(['A', 'B', 'C'], 10 + i)) for i in range(2)]  # x9=144
+        vrl += [(_ax(20, '軸y'), _rows(['A', 'B', 'C', 'D', 'E'], 20))]           # x5=720
+        vrl += [(_ax(21, '軸z'), _rows(['A', 'B'], 21))]                          # x2=1440 > 1200 でも上限内
+        self.assertEqual(len(_build(vrl)), 1440)
 
 
 class TestTimeBudget(unittest.TestCase):
@@ -120,6 +138,43 @@ class TestTimeBudget(unittest.TestCase):
 
     def test_no_budget_is_noop(self):
         flow_walker.check_time_budget()
+
+
+_JSON43 = os.path.join(_PARENT, '..', '工種別',
+                       '43_610827_捨石本均し･荒均し(水中)､捨石本均し･荒均し(陸上) 【潜',
+                       'input', '32-5251.20260401.20260401.json')
+
+
+@unittest.skipUnless(os.path.exists(_JSON43), '43 実データ未配置')
+class TestGen2OverCapFallsBack(unittest.TestCase):
+    """網羅性補完(gen2)だけが上限超になる境界例: 補完を破棄して元の結果を使う。
+    43 は gen=600 / gen2=1,200。上限を 1,000 に落とすと gen2 だけが超える。"""
+
+    def setUp(self):
+        self._cap = ColumnTCGenerator.MAX_FULL_COMBOS
+
+    def tearDown(self):
+        ColumnTCGenerator.MAX_FULL_COMBOS = self._cap
+
+    def test_gen2_over_cap_uses_gen_result(self):
+        import gen_gjoken
+        ColumnTCGenerator.MAX_FULL_COMBOS = 1000
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            _bj, gen, g_list, notes = gen_gjoken.analyze(_JSON43)
+        self.assertIn('昇格を破棄', buf.getvalue())
+        self.assertTrue(g_list)
+        self.assertTrue(notes)          # 「注なし」にはならない(gen の全組合せから導出)
+        self.assertIsNotNone(getattr(gen, '_rows_cache', None))
+
+    def test_default_cap_runs_gen2_full(self):
+        import gen_gjoken
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            gen_gjoken.analyze(_JSON43)
+        log = buf.getvalue()
+        self.assertNotIn('組合せ上限', log)   # 既定上限 3,000 では両インスタンス全組合せ
+        self.assertNotIn('昇格を破棄', log)
 
 
 if __name__ == '__main__':
