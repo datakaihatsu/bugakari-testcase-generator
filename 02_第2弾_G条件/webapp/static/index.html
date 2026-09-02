@@ -12,8 +12,44 @@
       <h1>Gaia歩掛 G条件・テストケース生成ツール</h1>
       <span id="appver" class="appver" title="ツールのバージョン（お問い合わせ時はこの表記をお知らせください）"></span>
     </div>
-    <div id="cfgbar" class="cfgbar">格納場所を読込中…</div>
+    <div class="cfgbar">
+      <span id="cfgbar">格納場所を読込中…</span>
+      <button type="button" id="btnSettings" class="linkbtn" title="GaiaCloudのデータを別の場所（外付けSSD等）に置いている場合に変更します">変更</button>
+    </div>
     <div class="cfgnote">※ 上記の格納場所が<strong>最新の GaiaCloud データ</strong>を指しているかご確認ください。版が古いと、生成される G条件・テストケースが最新の歩掛と一致しません。</div>
+
+    <!-- 格納場所の変更（既定は固定。ここは普段は閉じている） -->
+    <section id="settingsPanel" class="settings hidden">
+      <h2>格納場所（GaiaCloud データ）の変更</h2>
+      <p class="hint">GaiaCloud のデータを既定の場所（<code>C:\ProgramData\CoBeing\GaiaCloud\DB</code>）以外、
+        たとえば外付けSSDに置いている場合に使います。設定はこのPCのユーザ領域に保存され、
+        <strong>ツールを新しい版に入れ替えても残ります</strong>。</p>
+
+      <label>データフォルダ（DB）
+        <span class="hint">例: E:\CoBeing\GaiaCloud\DB　※この下の Common / Bugakari を自動で探します</span>
+      </label>
+      <div class="row">
+        <input id="setRoot" type="text" placeholder="例: E:\CoBeing\GaiaCloud\DB" autocomplete="off">
+        <button type="button" id="btnDerive" class="secondary">このフォルダから設定</button>
+      </div>
+
+      <details id="setDetail" class="setdetail">
+        <summary>個別に指定する（上の自動設定でうまくいかない場合）</summary>
+        <label>ExpCDConvert.json のパス</label>
+        <input id="setExpcd" type="text" class="wide" autocomplete="off">
+        <label>Bugakari フォルダのパス</label>
+        <input id="setBugakari" type="text" class="wide" autocomplete="off">
+      </details>
+
+      <div class="row">
+        <button type="button" id="btnSetCheck" class="secondary">場所を確認</button>
+        <button type="button" id="btnSetSave">保存して反映</button>
+        <button type="button" id="btnSetReset" class="secondary">既定に戻す</button>
+        <button type="button" id="btnSetClose" class="secondary">閉じる</button>
+      </div>
+      <div id="setResult" class="result"></div>
+      <div id="setFile" class="hint"></div>
+    </section>
   </header>
 
   <nav class="tabs">

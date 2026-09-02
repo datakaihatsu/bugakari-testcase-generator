@@ -62,7 +62,8 @@ async function loadConfig() {
   try {
     const c = await (await fetch('/api/config')).json();
     $('appver').textContent = c.version_label || '';
-    $('cfgbar').textContent = `ExpCD: ${c.expcd_path}　|　歩掛: ${c.bugakari_root}`;
+    $('cfgbar').innerHTML = (c.is_custom ? '<span class="custombadge">変更中</span> ' : '')
+      + esc(`ExpCD: ${c.expcd_path}　|　歩掛: ${c.bugakari_root}`);
     updateHandoff(c.session);
   } catch (e) {
     $('cfgbar').textContent = '設定の読込に失敗しました';
@@ -194,6 +195,93 @@ $('btnGenTCNew').addEventListener('click', async () => {
     + dlLink(r)
     + '<div class="hint">条件列の見出しは色付き。2件目以降のパターンは、直前の行と変わった選択肢セルが色付きです。生成後は必ず人が目視レビューしてください。</div>'
     + logBlock(r);
+});
+
+// ---- 設定: 格納場所（GaiaCloudデータ）の変更 ----
+// 既定は固定のまま。データを外付けSSD等へ移した端末だけがここを使う（2026-09-02 要望）。
+function setMsg(html) { $('setResult').innerHTML = html; }
+
+function checkBlock(check) {
+  if (!check) return '';
+  const li = (label, c) =>
+    `<li class="${c.ok ? 'ok' : 'err'}">${label}: ${esc(c.text)}</li>`;
+  return `<ul class="checklist">${li('ExpCDConvert.json', check.expcd)}`
+    + `${li('Bugakari フォルダ', check.bugakari)}</ul>`;
+}
+
+async function openSettings() {
+  $('settingsPanel').classList.remove('hidden');
+  setMsg('');
+  const st = await (await fetch('/api/settings')).json();
+  $('setExpcd').value = st.expcd_path || '';
+  $('setBugakari').value = st.bugakari_root || '';
+  $('setFile').textContent = `設定の保存先: ${st.settings_file}`
+    + (st.is_custom ? '（現在この設定が有効）' : '（未作成＝配布既定を使用中）');
+  setMsg(checkBlock(st.check));
+  $('setRoot').focus();
+}
+
+$('btnSettings').addEventListener('click', () => {
+  const p = $('settingsPanel');
+  if (p.classList.contains('hidden')) { openSettings(); } else { p.classList.add('hidden'); }
+});
+$('btnSetClose').addEventListener('click', () => $('settingsPanel').classList.add('hidden'));
+
+// フォルダ1つ（DB）から2つのパスを推定して詳細欄へ流し込む
+$('btnDerive').addEventListener('click', async () => {
+  const root = $('setRoot').value.trim();
+  if (!root) { setMsg('<span class="err">データフォルダを入力してください</span>'); return; }
+  setMsg('確認中…');
+  const r = await postJSON('/api/settings', { action: 'derive', root });
+  if (!r.ok) { setMsg(`<span class="err">${esc(r.error)}</span>`); return; }
+  $('setExpcd').value = r.expcd_path;
+  $('setBugakari').value = r.bugakari_root;
+  $('setDetail').open = true;
+  setMsg(`<div>この場所を使います: <code>${esc(r.db_root)}</code></div>${checkBlock(r.check)}`
+    + '<div class="hint">問題なければ「保存して反映」を押してください。</div>');
+});
+
+$('btnSetCheck').addEventListener('click', async () => {
+  setMsg('確認中…');
+  const r = await postJSON('/api/settings', {
+    action: 'check', expcd_path: $('setExpcd').value, bugakari_root: $('setBugakari').value });
+  $('setExpcd').value = r.expcd_path || $('setExpcd').value;
+  setMsg(checkBlock(r.check));
+});
+
+async function saveSettings(force) {
+  setMsg('保存中…');
+  const r = await postJSON('/api/settings', {
+    action: 'save', force: !!force,
+    expcd_path: $('setExpcd').value, bugakari_root: $('setBugakari').value });
+  if (r.error) {
+    setMsg(`<span class="err">${esc(r.error)}</span>${checkBlock(r.check)}`
+      + (r.can_force ? '<div class="row"><button type="button" id="btnSetForce" class="secondary">'
+        + '確認できないまま保存する（外付けドライブ未接続の場合など）</button></div>' : ''));
+    const f = $('btnSetForce');
+    if (f) f.addEventListener('click', () => saveSettings(true));
+    return;
+  }
+  setMsg(`<div class="summary ok">${esc(r.message)}</div>${checkBlock(r.check)}`);
+  $('setFile').textContent = `設定の保存先: ${r.settings_file}`
+    + (r.is_custom ? '（現在この設定が有効）' : '（未作成＝配布既定を使用中）');
+  $('setExpcd').value = r.expcd_path || '';
+  $('setBugakari').value = r.bugakari_root || '';
+  loadConfig();  // ヘッダーの表示を更新
+}
+$('btnSetSave').addEventListener('click', () => saveSettings(false));
+
+$('btnSetReset').addEventListener('click', async () => {
+  if (!confirm('配布時の既定の格納場所に戻します。よろしいですか？')) return;
+  setMsg('戻しています…');
+  const r = await postJSON('/api/settings', { action: 'reset' });
+  if (r.error) { setMsg(`<span class="err">${esc(r.error)}</span>`); return; }
+  $('setExpcd').value = r.expcd_path || '';
+  $('setBugakari').value = r.bugakari_root || '';
+  $('setRoot').value = '';
+  $('setFile').textContent = `設定の保存先: ${r.settings_file}（未作成＝配布既定を使用中）`;
+  setMsg(`<div class="summary ok">${esc(r.message)}</div>${checkBlock(r.check)}`);
+  loadConfig();
 });
 
 // init

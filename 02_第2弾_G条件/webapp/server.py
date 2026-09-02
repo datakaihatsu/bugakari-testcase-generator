@@ -17,6 +17,8 @@ http.server ベース。127.0.0.1 バインドの単一ユーザ用ローカル�
   POST /api/locate           {input} → 歩掛キー×版候補
   POST /api/gen_g            {json_path} → G条件生成（商品_xlsx）。セッションに引継情報保存
   POST /api/gen_tc           {g30_b64,g30_name, use_session_g20|g20_b64} → TC生成（テストケース_xlsx）
+  GET  /api/settings         現在の格納場所・出所（既定/ユーザ設定）・実在チェック
+  POST /api/settings         {action: derive|check|save|reset} 格納場所の変更（画面の「変更」）
 
 設計書: 運用化設計書_2026-07-07.md §9。
 """
@@ -48,6 +50,15 @@ _SESSION = {'g20_csv': None, 'old_json': None, 'koshu': None}
 _CT_XLSX = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
 _CT_BY_EXT = {'.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8',
               '.css': 'text/css; charset=utf-8'}
+
+
+def _reload_cfg():
+    """設定変更後に CFG を作り直す。ハンドラは CFG を参照するので **中身を入れ替える**
+    （再代入すると既存の参照が古い辞書のままになるため）。"""
+    fresh = service.load_config()
+    CFG.clear()
+    CFG.update(fresh)
+    return CFG
 
 
 def _register_download(path):
@@ -127,9 +138,12 @@ class Handler(BaseHTTPRequestHandler):
                 'version_label': version.VERSION_LABEL,
                 'expcd_path': CFG['expcd_path'],
                 'bugakari_root': CFG['bugakari_root'],
+                'is_custom': bool(service.load_user_settings()),
                 'session': {'has_handoff': bool(_SESSION['g20_csv'] and _SESSION['old_json']),
                             'koshu': _SESSION['koshu']},
             })
+        elif route == '/api/settings':
+            self._send_json(service.settings_state(CFG))
         elif route == '/api/download':
             self._serve_download(parsed.query)
         else:
@@ -147,12 +161,77 @@ class Handler(BaseHTTPRequestHandler):
                 self._api_gen_tc()
             elif route == '/api/gen_tc_new':
                 self._api_gen_tc_new()
+            elif route == '/api/settings':
+                self._api_settings()
             else:
                 self._send_json({'error': 'not found'}, 404)
         except Exception as e:  # noqa: BLE001 UIへ返す
             import traceback
             self._send_json({'error': '%s: %s' % (type(e).__name__, e),
                              'trace': traceback.format_exc()}, 500)
+
+    def _api_settings(self):
+        """格納場所の変更（GaiaCloudデータを外付けSSD等へ移した端末向け・2026-09-02 要望）。
+        action: derive=フォルダ1つから2パスを推定 / check=実在確認のみ /
+                save=ユーザ設定へ保存して即時反映 / reset=配布既定へ戻す。
+        保存先は配布フォルダの外（%LOCALAPPDATA%）なので、ツール更新で消えない。"""
+        body = self._read_json()
+        action = body.get('action') or 'check'
+
+        if action == 'derive':
+            d = service.derive_from_root(body.get('root'))
+            if d['ok']:
+                d['check'] = service.check_paths(d['expcd_path'], d['bugakari_root'])
+            self._send_json(d)
+            return
+
+        if action == 'reset':
+            try:
+                service.clear_user_settings()
+            except OSError as e:
+                self._send_json({'error': '設定の削除に失敗しました: %s' % e})
+                return
+            st = service.settings_state(_reload_cfg())
+            st.update({'error': None, 'saved': True,
+                       'message': '配布時の既定の格納場所に戻しました'})
+            self._send_json(st)
+            return
+
+        expcd, bug = service.normalize_setting_paths(
+            body.get('expcd_path'), body.get('bugakari_root'))
+        check = service.check_paths(expcd, bug)
+
+        if action == 'check':
+            self._send_json({'error': None, 'saved': False, 'expcd_path': expcd,
+                             'bugakari_root': bug, 'check': check})
+            return
+
+        if action != 'save':
+            self._send_json({'error': '不明な操作です: %s' % action})
+            return
+
+        if not expcd or not bug:
+            self._send_json({'error': '2つのパスを両方入力してください',
+                             'expcd_path': expcd, 'bugakari_root': bug, 'check': check})
+            return
+        # 既定は「確認できないパスは保存させない」。ただし外付けSSD未接続のまま
+        # 設定だけ先に入れたいケースがあるので force で通せるようにする。
+        if not check['ok'] and not body.get('force'):
+            self._send_json({'error': '指定の場所を確認できませんでした（下の確認結果を参照）',
+                             'expcd_path': expcd, 'bugakari_root': bug, 'check': check,
+                             'can_force': True})
+            return
+        try:
+            service.save_user_settings({'expcd_path': expcd, 'bugakari_root': bug})
+        except OSError as e:
+            self._send_json({'error': '設定の保存に失敗しました: %s' % e})
+            return
+        st = service.settings_state(_reload_cfg())
+        msg = '格納場所を変更しました'
+        if not check['ok']:
+            msg += '（※この場所は今は確認できていません。ドライブを接続してからご使用ください）'
+        st.update({'error': None, 'saved': True, 'message': msg})
+        self._send_json(st)
 
     def _api_locate(self):
         body = self._read_json()
@@ -248,6 +327,9 @@ def main(open_browser=True):
     print('Gaia歩掛TCツール', version.VERSION_LABEL, '起動:', url, ' (Ctrl+Cで終了)')
     print('  ExpCD    :', CFG['expcd_path'])
     print('  Bugakari :', CFG['bugakari_root'])
+    if service.load_user_settings():
+        # 既定と違う場所を見ている端末は、問い合わせ時にここを見れば一発で分かる
+        print('  ※ 格納場所は画面の設定で変更されています:', service.user_settings_path())
     # ソケットは make_server の時点で bind+listen 済み → ここで開けば接続拒否にならない
     # （serve_forever 前の接続も listen バックログに積まれる）。
     if open_browser and '--no-browser' not in sys.argv:

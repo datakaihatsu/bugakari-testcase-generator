@@ -21,6 +21,16 @@ h1 { font-size: 18px; margin: 0 0 4px; }
 .appver { font-size: 12px; color: var(--hint); white-space: nowrap; }
 h2 { font-size: 15px; margin: 0 0 12px; }
 .cfgbar { font-size: 12px; color: var(--hint); word-break: break-all; }
+/* 「変更」= 格納場所の設定。既定運用の邪魔をしないよう、テキストリンク相当の控えめな見た目 */
+.linkbtn {
+  background: none; border: none; padding: 0 2px; margin-left: 8px; font-size: 12px;
+  color: var(--hint); text-decoration: underline; cursor: pointer;
+}
+.linkbtn:hover { color: var(--accent); }
+.custombadge {
+  background: var(--warn); color: #fff; border-radius: 8px; padding: 0 6px;
+  font-size: 11px; margin-right: 4px;
+}
 .cfgnote { font-size: 12px; color: var(--err); margin-top: 3px; }
 .cfgnote strong { font-weight: 700; }
 
@@ -88,3 +98,17 @@ details.log pre {
 .handoff .chip { background: var(--cond); padding: 3px 10px; border-radius: 12px; }
 .spinner { color: var(--hint); font-size: 13px; }
 .hidden { display: none; }
+
+/* 格納場所の変更パネル（普段は hidden。外付けSSD等へデータを移した端末だけが使う） */
+.settings {
+  background: var(--card); border: 1px solid var(--border); border-radius: 8px;
+  padding: 14px 18px; margin: 10px 0 4px; max-width: 860px;
+}
+.settings h2 { font-size: 14px; margin: 0 0 6px; }
+.settings p.hint { margin: 0 0 4px; display: block; margin-left: 0; }
+.settings code { background: var(--log-bg); padding: 1px 4px; border-radius: 4px; }
+.settings input.wide { width: 100%; display: block; }
+.setdetail { margin: 10px 0; }
+.setdetail summary { cursor: pointer; font-size: 13px; color: var(--hint); }
+.checklist { margin: 6px 0; padding-left: 20px; }
+.checklist li { margin: 2px 0; }

@@ -56,8 +56,10 @@ DEFAULT_CONFIG = {
 # ----------------------------------------------------------------------------
 # config
 # ----------------------------------------------------------------------------
-def load_config(path=None):
-    """config.json を読み既定にマージ。無ければ既定のまま。"""
+def load_config(path=None, use_user_settings=True):
+    """config.json を読み既定にマージ。無ければ既定のまま。
+    さらに（use_user_settings=True のとき）ユーザ設定ファイル（格納場所の変更）を最後に重ねる。
+    優先順: DEFAULT_CONFIG < config.json（配布既定） < ユーザ設定（画面の「格納場所を変更」）。"""
     cfg = dict(DEFAULT_CONFIG)
     path = path or os.path.join(_HERE, 'config.json')
     if os.path.exists(path):
@@ -67,7 +69,157 @@ def load_config(path=None):
             cfg.update({k: v for k, v in user.items() if v is not None})
         except (OSError, ValueError):
             pass  # 壊れたconfigは無視して既定で動く
+    if use_user_settings:
+        cfg.update(load_user_settings())
     return cfg
+
+
+# ----------------------------------------------------------------------------
+# ユーザ設定（格納場所の変更）
+#   GaiaCloud のデータを外付けSSD等へ移した端末向け（2026-09-02 要望）。
+#   保存先は **配布フォルダの外**（%LOCALAPPDATA%）。差分リビルドで app/ を丸ごと
+#   上書きしてもユーザの設定が消えないようにするため（config.json に書かない）。
+# ----------------------------------------------------------------------------
+USER_SETTING_KEYS = ('expcd_path', 'bugakari_root')
+_APP_DIRNAME = 'GaiaKoshuTC'
+
+
+def user_settings_path():
+    """ユーザ設定ファイルのパス。Windowsは %LOCALAPPDATA%/GaiaKoshuTC/settings.json。"""
+    base = os.environ.get('GAIA_TC_SETTINGS_DIR') or os.environ.get('LOCALAPPDATA')
+    if not base:
+        base = os.path.join(os.path.expanduser('~'), '.' + _APP_DIRNAME)
+        return os.path.join(base, 'settings.json')
+    return os.path.join(base, _APP_DIRNAME, 'settings.json')
+
+
+def load_user_settings():
+    """ユーザ設定を読む。無い/壊れている場合は {}（既定で動く）。"""
+    path = user_settings_path()
+    if not os.path.exists(path):
+        return {}
+    try:
+        with open(path, encoding='utf-8-sig') as f:
+            data = json.load(f)
+    except (OSError, ValueError):
+        return {}
+    if not isinstance(data, dict):
+        return {}
+    out = {}
+    for k in USER_SETTING_KEYS:
+        v = data.get(k)
+        if isinstance(v, str) and v.strip():
+            out[k] = v.strip()
+    return out
+
+
+def save_user_settings(values):
+    """ユーザ設定を保存する。既知キーのみ書き込む。失敗時は OSError。"""
+    path = user_settings_path()
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    data = {k: str(values[k]).strip() for k in USER_SETTING_KEYS
+            if values.get(k) and str(values[k]).strip()}
+    with open(path, 'w', encoding='utf-8') as f:
+        json.dump(data, f, ensure_ascii=False, indent=2)
+    return path
+
+
+def clear_user_settings():
+    """ユーザ設定を削除し、配布既定（config.json）へ戻す。"""
+    path = user_settings_path()
+    if os.path.exists(path):
+        os.remove(path)
+    return path
+
+
+def normalize_setting_paths(expcd_path, bugakari_root):
+    """入力の揺れを吸収する。
+      - 前後空白 / 引用符 / 末尾の区切り記号を除去
+      - ExpCD にフォルダを指定された場合は ExpCDConvert.json / Common/ExpCDConvert.json を補う
+    戻り値: (expcd_path, bugakari_root)"""
+    def _clean(s):
+        s = str(s or '').strip().strip('"').strip("'")
+        return s.rstrip('\\/') if len(s) > 3 else s
+
+    e, b = _clean(expcd_path), _clean(bugakari_root)
+    if e and os.path.isdir(e):
+        for cand in (os.path.join(e, 'ExpCDConvert.json'),
+                     os.path.join(e, 'Common', 'ExpCDConvert.json')):
+            if os.path.isfile(cand):
+                e = cand
+                break
+    return e, b
+
+
+def derive_from_root(root):
+    """フォルダ1つ（例: E:/GaiaCloud/DB や E:/GaiaCloud）から2つのパスを導く。
+    `<DB>/Common/ExpCDConvert.json` と `<DB>/Bugakari` の並びを手掛かりに DB 階層を探す。
+    戻り値: {'ok', 'db_root', 'expcd_path', 'bugakari_root', 'error'}"""
+    out = {'ok': False, 'db_root': None, 'expcd_path': None, 'bugakari_root': None,
+           'error': None}
+    root = str(root or '').strip().strip('"').strip("'")
+    if len(root) > 3:
+        root = root.rstrip('\\/')
+    if not root:
+        out['error'] = 'フォルダを入力してください'
+        return out
+    if not os.path.isdir(root):
+        out['error'] = 'フォルダが見つかりません: %s' % root
+        return out
+    # 指定フォルダ自身 → DB → GaiaCloud/DB → CoBeing/GaiaCloud/DB の順で探す
+    cands = [root,
+             os.path.join(root, 'DB'),
+             os.path.join(root, 'GaiaCloud', 'DB'),
+             os.path.join(root, 'CoBeing', 'GaiaCloud', 'DB')]
+    for db in cands:
+        expcd = os.path.join(db, 'Common', 'ExpCDConvert.json')
+        bug = os.path.join(db, 'Bugakari')
+        if os.path.isfile(expcd) or os.path.isdir(bug):
+            out.update({'ok': True, 'db_root': db.replace(os.sep, '/'),
+                        'expcd_path': expcd.replace(os.sep, '/'),
+                        'bugakari_root': bug.replace(os.sep, '/')})
+            return out
+    out['error'] = ('このフォルダの下に Common/ExpCDConvert.json と Bugakari が見つかりません: %s'
+                    % root)
+    return out
+
+
+def check_paths(expcd_path, bugakari_root):
+    """指定パスの実在チェック。UI表示用の判定を返す（保存の可否判断にも使う）。
+    戻り値: {'ok', 'expcd': {'ok','text'}, 'bugakari': {'ok','text'}}"""
+    e_ok = bool(expcd_path) and os.path.isfile(expcd_path)
+    b_ok = bool(bugakari_root) and os.path.isdir(bugakari_root)
+    b_text = 'NG: フォルダが見つかりません'
+    if b_ok:
+        b_text = 'OK: フォルダを確認しました'
+        try:
+            with os.scandir(bugakari_root) as it:
+                n = sum(1 for _ in it)
+            b_text += '（直下 %d 項目）' % n
+        except OSError:
+            pass  # 件数は付加情報。取れなくてもOK判定は変えない
+    return {
+        'ok': e_ok and b_ok,
+        'expcd': {'ok': e_ok,
+                  'text': 'OK: ファイルを確認しました' if e_ok else 'NG: ファイルが見つかりません'},
+        'bugakari': {'ok': b_ok, 'text': b_text},
+    }
+
+
+def settings_state(cfg=None):
+    """現在の格納場所と、その出所（既定 / ユーザ設定）をまとめて返す（画面表示用）。"""
+    defaults = load_config(use_user_settings=False)
+    user = load_user_settings()
+    cfg = cfg or load_config()
+    return {
+        'expcd_path': cfg['expcd_path'],
+        'bugakari_root': cfg['bugakari_root'],
+        'defaults': {'expcd_path': defaults['expcd_path'],
+                     'bugakari_root': defaults['bugakari_root']},
+        'is_custom': bool(user),
+        'settings_file': user_settings_path(),
+        'check': check_paths(cfg['expcd_path'], cfg['bugakari_root']),
+    }
 
 
 # ----------------------------------------------------------------------------

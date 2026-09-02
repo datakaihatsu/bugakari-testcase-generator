@@ -10,17 +10,22 @@ test_server.py ― server.py のHTTP結合スモークテスト（標準ライ�
   - POST /api/gen_g   実JSON(06改定前)→G条件生成・DLトークン→DL可能
   - POST /api/gen_tc  引継ぎ(session)＋改修後(=06人作成CSVをbase64)→TC生成・DL可能
   - GET /api/download 生成xlsxがxlsxバイト(PK..)で返る
+  - GET/POST /api/settings 格納場所の変更（推定→保存→反映→既定に戻す）
+    ※保存先は GAIA_TC_SETTINGS_DIR で一時領域へ逃がし、実環境の設定を汚さない
 実データ(06/ExpCD)が無ければ該当テストを skip。
 """
 
 import os
 import json
 import base64
+import shutil
+import tempfile
 import threading
 import unittest
 import urllib.request
 
 import server
+import service
 import version
 
 BASE = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '運用案件', '06_土のう積工'))
@@ -102,6 +107,59 @@ class TestServer(unittest.TestCase):
     def test_5_gen_tc_missing_g30(self):
         st, body, _ = _req(self.base + '/api/gen_tc', {'use_session_g20': True})
         self.assertIsNotNone(json.loads(body).get('error'))
+
+    def test_6_settings_save_and_reset(self):
+        """格納場所の変更（外付けSSD運用対応）。保存で CFG が即差し替わり、reset で戻る。"""
+        tmpdir = tempfile.mkdtemp(prefix='settings_')
+        db = os.path.join(tmpdir, 'GaiaCloud', 'DB')
+        os.makedirs(os.path.join(db, 'Common'))
+        os.makedirs(os.path.join(db, 'Bugakari'))
+        with open(os.path.join(db, 'Common', 'ExpCDConvert.json'), 'w') as f:
+            f.write('{"ExpCDConvertList": []}')
+        old_env = os.environ.get('GAIA_TC_SETTINGS_DIR')
+        os.environ['GAIA_TC_SETTINGS_DIR'] = os.path.join(tmpdir, 'settings')
+        default_expcd = service.load_config(use_user_settings=False)['expcd_path']
+        try:
+            # 現状 = 既定
+            _, body, _ = _req(self.base + '/api/settings')
+            self.assertFalse(json.loads(body)['is_custom'])
+            # フォルダ1つから推定
+            _, body, _ = _req(self.base + '/api/settings',
+                              {'action': 'derive', 'root': tmpdir})
+            d = json.loads(body)
+            self.assertTrue(d['ok'], d.get('error'))
+            self.assertTrue(d['check']['ok'])
+            # 存在しないパスは保存させない（force なし）
+            _, body, _ = _req(self.base + '/api/settings',
+                              {'action': 'save', 'expcd_path': 'X:/nope.json',
+                               'bugakari_root': 'X:/nope'})
+            r = json.loads(body)
+            self.assertIsNotNone(r['error'])
+            self.assertTrue(r['can_force'])
+            # 保存 → CFG に即反映（/api/config の表示・locate の探索先が変わる）
+            _, body, _ = _req(self.base + '/api/settings',
+                              {'action': 'save', 'expcd_path': d['expcd_path'],
+                               'bugakari_root': d['bugakari_root']})
+            r = json.loads(body)
+            self.assertIsNone(r['error'], r['error'])
+            self.assertTrue(r['is_custom'])
+            _, cbody, _ = _req(self.base + '/api/config')
+            c = json.loads(cbody)
+            self.assertEqual(c['bugakari_root'], d['bugakari_root'])
+            self.assertTrue(c['is_custom'])
+            # 既定に戻す
+            _, body, _ = _req(self.base + '/api/settings', {'action': 'reset'})
+            r = json.loads(body)
+            self.assertFalse(r['is_custom'])
+            _, cbody, _ = _req(self.base + '/api/config')
+            self.assertEqual(json.loads(cbody)['expcd_path'], default_expcd)
+        finally:
+            if old_env is None:
+                os.environ.pop('GAIA_TC_SETTINGS_DIR', None)
+            else:
+                os.environ['GAIA_TC_SETTINGS_DIR'] = old_env
+            server._reload_cfg()
+            shutil.rmtree(tmpdir, ignore_errors=True)
 
 
 if __name__ == '__main__':
