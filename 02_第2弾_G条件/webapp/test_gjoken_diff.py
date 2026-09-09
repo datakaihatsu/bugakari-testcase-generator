@@ -215,10 +215,33 @@ class TestPlanCTextChangeObservation(unittest.TestCase):
         for c in others:
             self.assertNotIn('文字修正後の選択肢を選んだとき', c)
 
-    def test_row_and_column_counts_unchanged(self):
-        # 案C は観点文だけを変える: 12 は TC 3 行 / 14 列 のまま
+    def test_row_count_unchanged(self):
+        # 観点文の変更(v1.2.3 案C)は行数を変えない
         self.assertEqual(len(self.rows) - 1, 3)
-        self.assertEqual(len(self.rows[0]), 14)
+
+    def test_no_row_shows_a_value_for_an_unselected_series(self):
+        """確定設計B/C/F 以降: 系列を選んでいないのに、その系列の質量区分に値が
+        入っている行を作らない。
+
+        旧ベースライン(v1.2.3)の TC-003 は 機械質量区分=「ブルドーザ 通称21t級を
+        超え44t級以下」なのに (クローラ式杭打機)質量区分 等 3 列に
+        「機械質量20t以上60t以下」が入っていた（表示と計算の食い違い。2件目と同類型）。
+        修正後はこの矛盾が起きないことを固定する（列数は 14→12 になる）。
+        """
+        h = self.rows[0]
+        i_kind = h.index('機械質量区分')
+        series = {'(クローラ式杭打機)質量区分': 'クローラ式杭打機',
+                  '(中層混合処理機)質量区分': '中層混合処理機',
+                  '(中層混合処理機以外)質量区分': '中層混合処理機以外'}
+        for col, keyword in series.items():
+            if col not in h:
+                continue
+            i = h.index(col)
+            for r in self.rows[1:]:
+                if r[i] in ('', '-'):
+                    continue
+                self.assertIn(keyword, r[i_kind],
+                              f'{col} に値があるのに 機械質量区分 が {r[i_kind]!r}')
 
 
 if __name__ == '__main__':

@@ -28,7 +28,8 @@ import re
 import itertools
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'engine'))
-from bugakari_json import BugakariJSON, KeisanHyo, ExternalReferenceError, ExpressionError
+from bugakari_json import (BugakariJSON, KeisanHyo, ExternalReferenceError,
+                           ExpressionError, choice_display_map, numeric_input_spec)
 from flow_walker import FlowWalker
 
 
@@ -150,45 +151,10 @@ class ColumnTCGenerator:
             r['RowID'] for r in sit_rows
             if r.get('Visible', True) and not r.get('IsFixed', False)
         ]
-        # D 改善: VarName 持ち列も表示候補に入れる (規格コード等が業務的に重要)
-        #   I (unique_count 優先) で適切な列が選ばれる
-        header_row_ids = [
-            r['RowID'] for r in sit_rows
-            if r.get('Visible', True) and r.get('IsFixed', False)
-        ]
-
-        def _header_text(col_id):
-            for hr in header_row_ids:
-                v = cells.get((hr, col_id))
-                if v:
-                    return str(v)
-            return ''
-
-        disp_col_candidates = [
-            c for c in cols
-            if c.get('Visible', True)
-            # 「係数」列 (補正係数 1/1.1 等) は計算パラメータであり名称ではない → 表示候補から除外
-            and '係数' not in _header_text(c.get('ColID'))
-        ]
-        if not disp_col_candidates:
-            disp_col_candidates = [c for c in cols if c.get('Visible', True)]
-        disp_col = None
-        best_score = (-1, -1, -1)
-        for c in disp_col_candidates:
-            col_id = c.get('ColID')
-            values = []
-            for rid in selectable_row_ids:
-                v = cells.get((rid, col_id))
-                if v and str(v).strip():
-                    values.append(str(v).strip())
-            text_count = len(values)
-            unique_count = len(set(values))
-            # D 改善: 同点なら VarName 持ち列 (規格コード等) を優先
-            has_varname = 1 if c.get('VarName') else 0
-            score = (unique_count, has_varname, text_count)
-            if score > best_score:
-                best_score = score
-                disp_col = col_id
+        # 確定設計C C-R1/R2/R2': 表示列の選定は ①(_g_options) と同じ共通関数で行う。
+        #   旧「D改善: 同点なら VarName 持ち列を優先」(2026-06-01 Cowork#43 / 03 の「86」表記)は
+        #   G条件表としてラベルのほうが分かりやすいという判断で置き換えた (2026-09-09)。
+        disp_map, disp_col, _extra_cols = choice_display_map(sit019)
 
         # J4: 「規格コード」 列の併記
         #   VarName 持ち列に -9999999999 (業務的に「未対策」 等を表す記号値) を
@@ -212,7 +178,7 @@ class ColumnTCGenerator:
             row_id = sr.get('RowID')
             if not sr.get('Visible', True) or sr.get('IsFixed', False):
                 continue
-            text_display = cells.get((row_id, disp_col), '').replace('\r\n', ' ').strip() if disp_col else f'Row{row_id}'
+            text_display = disp_map.get(row_id, f'Row{row_id}')
             # J4: 規格コード列の併記
             if value_col is not None:
                 value_part = str(cells.get((row_id, value_col), '')).strip()
@@ -308,16 +274,22 @@ class ColumnTCGenerator:
         if sit.get('SitsumonKind') == 8:
             return [{'row_id': 0, 'display': '任意', 'var_settings': {},
                      'sit_no': sitsumon_no, 'disp_col': None, 'value_col': None}]
-        for s017 in self.new_json.data.get('Sitsumon017', []):
-            if s017.get('SitsumonNo') == sitsumon_no:
-                default = s017.get('DefaultValue', 0)
-                vname = s017.get('VarName', '')
-                return [{
-                    'row_id': 0,
-                    'display': '任意',
-                    'var_settings': {vname: default} if vname else {},
-                }]
-        return [{'row_id': 0, 'display': '(値なし)', 'var_settings': {}}]
+        # 確定設計C C-R5: Sitsumon017 の定義は canonical 側にしか無い(ShortCut子は持たない)。
+        #   自分の番号だけで探すと見つからず `(値なし)` になっていた(4件目②-a / 16・38・64-1538)。
+        spec = numeric_input_spec(self.new_json, sitsumon_no)
+        if spec is not None:
+            vname = spec.get('var') or ''
+            default = spec.get('default', 0)
+            return [{
+                'row_id': 0,
+                'display': '任意',
+                'var_settings': {vname: default} if vname else {},
+            }]
+        # C-R6: `(値なし)` は「定義が見つからない」内部状態であり利用者に見せる語ではない。
+        #   ここに来たら定義の取りこぼしなので、表示は「任意」にしたうえで警告を出す。
+        print(f'  [警告] Sitsumon{sitsumon_no} の入力定義(Sitsumon017)が見つかりません。'
+              f'「任意」として扱います。')
+        return [{'row_id': 0, 'display': '任意', 'var_settings': {}}]
 
     def _has_added_daika(self):
         """旧→新で代価表行が追加されたか (extract_diff と同一判定)。
@@ -613,14 +585,25 @@ class ColumnTCGenerator:
         return result
 
     def _get_default_row(self, sitsumon_no, rows):
-        for tab in self.new_json.data.get('SitTab', []):
-            if tab.get('SitsumonNo') == sitsumon_no:
-                default_id = tab.get('DefaultRowID')
-                if default_id:
-                    for r in rows:
-                        if r['row_id'] == default_id:
-                            return r
+        """既定行。ShortCut 質問は自分の SitTab を持たないので ShortCut 先までたどる
+        (確定設計B B-R2)。たどらないと表示は先頭行・FlowWalker は ShortCut 先の
+        DefaultRowID となり、TC の表示と計算がずれる(2件目 原因2)。"""
+        seen = set()
+        cur = sitsumon_no
+        while cur is not None and cur not in seen:
+            seen.add(cur)
+            for tab in self.new_json.data.get('SitTab', []):
+                if tab.get('SitsumonNo') == cur:
+                    default_id = tab.get('DefaultRowID')
+                    if default_id:
+                        for r in rows:
+                            if r['row_id'] == default_id:
+                                return r
+                    return rows[0] if rows else None
+            sc = (self.new_json.sitsumon_by_no.get(cur) or {}).get('ShortCutSitsumonNo')
+            if not sc or sc in seen:
                 break
+            cur = sc
         return rows[0] if rows else None
 
     def _get_row_by_id(self, rows, row_id):
@@ -1249,6 +1232,21 @@ class ColumnTCGenerator:
             all_visited = set()
             for combo in combos:
                 tc_vary_sels = dict(forced_rows)
+                # 確定設計B B-R3: 強制行IDの無い fix 軸は、表示に使う行を FlowWalker にも渡す。
+                #   表示行と計算行が別々に決まる構造そのものを塞ぐ(2件目 原因2 の再発防止)。
+                #   ただし行に AutoSelectJoken を持つ質問は上流の変数が行を決めるため対象外
+                #   (静的な既定行で上書きすると実機と食い違う。例 06 作業区分 Sit1=FG駆動)。
+                for _fax in fix_or_auto_axes:
+                    _fsn = int(_fax['SitsumonNo'])
+                    if _fax.get('種別') != 'fix' or _fsn in tc_vary_sels:
+                        continue
+                    _fs019 = self.new_json.sitsumon019_by_no.get(_fsn)
+                    if _fs019 and any((_tr.get('AutoSelectJoken') or {}).get('VarName')
+                                      for _tr in _fs019.get('SitTabRows', [])):
+                        continue
+                    _frow = fix_chosen.get(_fax['軸ID'])
+                    if _frow and _frow.get('row_id'):
+                        tc_vary_sels[_fsn] = _frow['row_id']
                 for (ax, _), chosen_row in zip(vary_row_lists, combo):
                     tc_vary_sels[int(ax['SitsumonNo'])] = chosen_row['row_id']
                 tcw = FlowWalker(self.new_json, vary_selections=tc_vary_sels)
@@ -1281,6 +1279,21 @@ class ColumnTCGenerator:
                                 rc[biz_rule_axis_idx] = biz_rows[0]
                             combos[-1] = tuple(rc)
                             tc_vary_sels = dict(forced_rows)
+                            # 確定設計B B-R3: 強制行IDの無い fix 軸は、表示に使う行を FlowWalker にも渡す。
+                            #   表示行と計算行が別々に決まる構造そのものを塞ぐ(2件目 原因2 の再発防止)。
+                            #   ただし行に AutoSelectJoken を持つ質問は上流の変数が行を決めるため対象外
+                            #   (静的な既定行で上書きすると実機と食い違う。例 06 作業区分 Sit1=FG駆動)。
+                            for _fax in fix_or_auto_axes:
+                                _fsn = int(_fax['SitsumonNo'])
+                                if _fax.get('種別') != 'fix' or _fsn in tc_vary_sels:
+                                    continue
+                                _fs019 = self.new_json.sitsumon019_by_no.get(_fsn)
+                                if _fs019 and any((_tr.get('AutoSelectJoken') or {}).get('VarName')
+                                                  for _tr in _fs019.get('SitTabRows', [])):
+                                    continue
+                                _frow = fix_chosen.get(_fax['軸ID'])
+                                if _frow and _frow.get('row_id'):
+                                    tc_vary_sels[_fsn] = _frow['row_id']
                             for (ax, _), chosen_row in zip(vary_row_lists, combos[-1]):
                                 tc_vary_sels[int(ax['SitsumonNo'])] = chosen_row['row_id']
                             tcw = FlowWalker(self.new_json, vary_selections=tc_vary_sels)
@@ -1580,6 +1593,20 @@ class ColumnTCGenerator:
                 disp = self._display_for_tab(row, hyo) if row else ''
                 checks.append(f'{ax["軸名"]}(初期値変更)')
                 checks.append(f'・「{disp}」と表示されているが、外部設計と正しいか(初期値の変更)')
+
+            # 確定設計C C-R9: 数量入力に範囲がある条件は、範囲を確認観点に出す。
+            #   実機(Gaia)は範囲外を拒否せず確認ダイアログで警告し「そのまま進める」も可能
+            #   (内部仕様書 追補3 / Sitsumon017Panel.cs)。文言は「警告が出ること」とする。
+            for ax in axes_columns:
+                _rsn = int(ax['SitsumonNo'])
+                if _rsn not in tc_visited or _rsn in _closed_set:
+                    continue
+                _spec = numeric_input_spec(self.new_json, _rsn)
+                if not _spec or not _spec.get('range'):
+                    continue
+                _unit = f'（単位: {_spec["unit"]}）' if _spec.get('unit') else ''
+                checks.append(f'・{ax["軸名"]} は 範囲 {_spec["range"]} の値のみ有効{_unit}。'
+                              f'範囲外を入力すると警告が出ること')
 
             # 代価表行追加の確認観点 (質問の変更がなく代価表行が追加されたケース)
             #   例: 01 回航費 (S1-S5 が無く代価表数率が出力)。期待値の代わりに

@@ -267,6 +267,15 @@ def _apply_ymd(json_path):
     return m.group(2) if m else ''
 
 
+def _note_sheet(csv30):
+    """(注)の解釈シート（確定設計A A-R9）。読めなければ空を返す。"""
+    try:
+        g = gen_tc_from_gjoken.read_gjoken(csv30)
+        return gen_tc_from_gjoken.note_sheet_rows(g)
+    except Exception:  # noqa: BLE001
+        return []
+
+
 def _note_lint(csv30):
     """改修後G条件CSVの(注)を解釈し、UI表示用の指摘リストを返す。
     [{level: INFO/WARN/ERROR, text}]。読めなかった注を黙って捨てないための可視化
@@ -368,7 +377,8 @@ def gen_tc(g20, g30, old_json, cfg=None, out_dir=None):
         koshu = os.path.splitext(os.path.basename(s3))[0]
         koshu = koshu.replace('step3.0_テストケース_', '').replace('step3.0_テストケース', '')
         xlsx = os.path.join(wd, 'テストケース_%s.xlsx' % (koshu or '出力'))
-        io_xlsx.csv_to_xlsx(s3, xlsx)  # 条件列見出しを自動色付け
+        io_xlsx.csv_to_xlsx(s3, xlsx,  # 条件列見出しを自動色付け
+                            extra_sheets=[('(注)の解釈', _note_sheet(csv30))])
         out['xlsx_path'] = xlsx
         matrix, _ = io_xlsx.read_csv_matrix(s3)
         if matrix:
@@ -407,7 +417,8 @@ def gen_tc_new(g30, cfg=None, out_dir=None):
         out['csv_path'] = s3
         out['log'] = log
         xlsx = os.path.join(wd, 'テストケース_%s.xlsx' % (koshu or '出力'))
-        io_xlsx.csv_to_xlsx(s3, xlsx)  # 条件列見出し＋変更セルを自動色付け
+        io_xlsx.csv_to_xlsx(s3, xlsx,  # 条件列見出し＋変更セルを自動色付け
+                            extra_sheets=[('(注)の解釈', _note_sheet(csv30))])
         out['xlsx_path'] = xlsx
         matrix, _ = io_xlsx.read_csv_matrix(s3)
         if matrix:

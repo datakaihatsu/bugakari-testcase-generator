@@ -118,7 +118,8 @@ def detect_tc_condition_cols(matrix):
 
 
 def matrix_to_xlsx(matrix, xlsx_path, sheet_title='Sheet1',
-                   highlight_header_cols=None, header_fill=CONDITION_HEADER_FILL):
+                   highlight_header_cols=None, header_fill=CONDITION_HEADER_FILL,
+                   extra_sheets=None):
     """list[list[str]] → xlsx。全セル文字列格納・セル内改行はwrap保存・値のみ（装飾最小）。
     列幅は「(注)」より上の表部分だけで算出する（注の長文で列が広がるのを防ぐ。
     注は右の空セルへオーバーフロー表示される）。
@@ -193,6 +194,27 @@ def matrix_to_xlsx(matrix, xlsx_path, sheet_title='Sheet1',
                             cell.fill = change_fill
             prev = row
 
+    # 確定設計A A-R9: 2枚目以降のシート（例「(注)の解釈」）。
+    #   extra_sheets = [(シート名, list[list[str]]), ...]
+    for _title, _rows in (extra_sheets or []):
+        if not _rows:
+            continue
+        ws2 = wb.create_sheet((_title or 'Sheet')[:31])
+        for _r in _rows:
+            ws2.append([_cell_to_str(v) for v in _r])
+        for _c in ws2[1]:
+            _c.font = Font(bold=True)
+            _c.fill = PatternFill('solid', fgColor=CONDITION_HEADER_FILL)
+        _widths = {}
+        for _row in _rows:
+            for _i, _v in enumerate(_row, 1):
+                _widths[_i] = max(_widths.get(_i, 8), min(_disp_width(_cell_to_str(_v)) + 2, 60))
+        for _i, _w in _widths.items():
+            ws2.column_dimensions[openpyxl.utils.get_column_letter(_i)].width = _w
+        for _row in ws2.iter_rows(min_row=2):
+            for _c in _row:
+                _c.alignment = Alignment(wrap_text=True, vertical='top')
+
     os.makedirs(os.path.dirname(os.path.abspath(xlsx_path)), exist_ok=True)
     wb.save(xlsx_path)
     return xlsx_path
@@ -212,12 +234,15 @@ def xlsx_to_matrix(xlsx_path, sheet=None):
 # ----------------------------------------------------------------------------
 # 高水準API（ファイル→ファイル）
 # ----------------------------------------------------------------------------
-def csv_to_xlsx(csv_path, xlsx_path, sheet_title=None, header_fill=CONDITION_HEADER_FILL):
+def csv_to_xlsx(csv_path, xlsx_path, sheet_title=None, header_fill=CONDITION_HEADER_FILL,
+                extra_sheets=None):
     """CSVファイル → xlsxファイル。人に渡す面の生成。
-    TCなら条件列見出しを自動で header_fill 色に塗る（G条件は塗らない）。"""
+    TCなら条件列見出しを自動で header_fill 色に塗る（G条件は塗らない）。
+    extra_sheets で2枚目以降（例「(注)の解釈」）を付けられる（確定設計A A-R9）。"""
     matrix, _enc = read_csv_matrix(csv_path)
     title = sheet_title or os.path.splitext(os.path.basename(csv_path))[0]
-    return matrix_to_xlsx(matrix, xlsx_path, title, header_fill=header_fill)
+    return matrix_to_xlsx(matrix, xlsx_path, title, header_fill=header_fill,
+                          extra_sheets=extra_sheets)
 
 
 def xlsx_to_csv(xlsx_path, csv_path, encoding=WRITE_ENCODING):

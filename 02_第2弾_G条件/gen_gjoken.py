@@ -31,10 +31,12 @@ BASE = os.path.dirname(os.path.abspath(__file__))
 for p in ('engine', 'step2_proposals', 'step3_csv'):
     sys.path.insert(0, os.path.join(BASE, p))
 
-from bugakari_json import BugakariJSON                   # noqa: E402
+from bugakari_json import (BugakariJSON, choice_display_map,  # noqa: E402
+                           numeric_input_spec)
 from generate_proposals_new import run as run_plan_new   # noqa: E402
 from generate_proposals import TestPlanGenerator         # noqa: E402
 from generate_csv import ColumnTCGenerator, CombinationExplosionError  # noqa: E402
+from gjoken_reach import analyze_reach, ReachExplosionError  # noqa: E402,F401
 
 
 def _mk(oi):
@@ -79,43 +81,21 @@ def _canon_no(bj, sit_no):
 
 
 def _g_options(bj, sit_no):
-    """G条件の選択肢を [(row_id, ラベル), ...] で返す。説明テキスト列(非VarName・非数値)優先。"""
+    """G条件の選択肢を [(row_id, 内部キー, 表示文字列), ...] で返す。
+
+    表示列の選定は ③(generate_csv._get_axis_rows) と同じ共通関数
+    `choice_display_map` を使う（確定設計C C-R1）。従来は①③で別々のスコアを
+    使っており、同じ質問の選択肢が「30km以上 60km未満」と「0.1」に食い違っていた。
+    """
     s019 = _sit019_for(bj, sit_no)
     if not s019:
         return []
-    cells = {}
-    for c in s019.get('SitTabCells', []):
-        cells.setdefault((c.get('RowID'), c.get('ColID')), c.get('Value'))
+    disp_map, _dc, _ec = choice_display_map(s019)
     sel = [r['RowID'] for r in s019.get('SitRows', [])
            if r.get('Visible', True) and not r.get('IsFixed', False)]
-
-    def _isnum(v):
-        try:
-            float(str(v))
-            return True
-        except ValueError:
-            return False
-
-    best_col, best_score = None, (-1, -1, -1)
-    for c in s019.get('SitCols', []):
-        if c.get('Visible', True) is False:
-            continue
-        cid = c.get('ColID')
-        vals = [str(cells.get((r, cid), '') or '').strip() for r in sel]
-        vals = [v for v in vals if v]
-        if not vals:
-            continue
-        score = (0 if c.get('VarName') else 1,
-                 sum(1 for v in vals if not _isnum(v)),
-                 len(set(vals)))
-        if score > best_score:
-            best_score, best_col = score, cid
-    if best_col is None:
-        return []
     out = []
     for r in sel:
-        raw = str(cells.get((r, best_col), '') or '').strip()
-        raw = raw.replace('\r\n', ' ').strip()
+        raw = str(disp_map.get(r, '') or '').strip()
         # raw = 表示用(元のまま。Gaia入力条件コード【A=1】等を残す)
         # v   = 内部識別子(コード除去。畳み込み/突合キーは従来どおり)
         v = re.sub(r'^【[^】]*】[\s　]+', '', raw).strip()
@@ -299,15 +279,21 @@ def _derive_glist(bj, gen, rows, json_path):
         numeric = any((bj.sitsumon_by_no.get(s, {}) or {}).get('SitsumonKind') == 17
                       for s in sits)
         if numeric:
-            unit = ''
+            # 確定設計C C-R5/R7/R8: 単位と入力範囲は共通関数から取る。
+            #   ShortCut 子は Sitsumon017 を持たないため、自分の番号だけで探すと
+            #   単位も範囲も取れない(4件目②)。範囲があれば「(範囲: 0 < 値)」を1セル追加。
+            unit, rng = '', ''
             for s in sits:
-                for e in bj.data.get('Sitsumon017', []):
-                    if e.get('SitsumonNo') == s and (e.get('TaniMesho') or '').strip():
-                        unit = (e.get('TaniMesho') or '').strip()
-                        break
-                if unit:
+                spec = numeric_input_spec(bj, s)
+                if not spec:
+                    continue
+                unit = unit or spec.get('unit') or ''
+                rng = rng or spec.get('range') or ''
+                if unit and rng:
                     break
             opt_labels = ['(実数入力)'] + ([f'({unit})'] if unit else [])
+            if rng:
+                opt_labels.append(f'(範囲: {rng})')
             opt_raws = list(opt_labels)  # 数量入力はコード併記なし
         label2mk = {lbl: _mk(i) for i, lbl in enumerate(opt_labels)}
         # TC表示値 -> 説明ラベル(row_id経由・Sitごと)。注のラベル/番号を表と一致。
@@ -353,7 +339,8 @@ def _derive_glist(bj, gen, rows, json_path):
             if gated:
                 v_label = gx['disp2label'].get(v, v)
                 mk = gx['label2mk'].get(v_label, '')
-                ylabel = '・'.join(f'G{yi+1}条件「{yn}」' for yi, yn in gated)
+                # 確定設計A A-R8: 条件名を書かない短い形。対象は「、」区切りの番号のみ。
+                ylabel = '、'.join(f'G{yi+1}条件' for yi, _yn in gated)
                 pos = (gx['opt_labels'].index(v_label)
                        if v_label in gx['opt_labels'] else -1)
                 pend.append({'xi': xi, 'name': gx['name'], 'mk': mk,
@@ -374,21 +361,22 @@ def _derive_glist(bj, gen, rows, json_path):
             if f['xi'] == e['xi'] and f['ylabel'] == e['ylabel']:
                 grp.append(f)
                 used[j] = True
+        # 確定設計A A-R8: 選択肢も印だけの短い形。
+        #   実数入力(印が無い)が起点の注だけ「任意」を残す。
+        def _sel_of(g):
+            return g['mk'] if g['mk'] else f"「{g['label']}」"
         if len(grp) == 1:
-            sel = f"{e['mk']}「{e['label']}」を選択した場合は"
+            sel = f"{_sel_of(e)}を選択した場合は"
         else:
             grp.sort(key=lambda g: g['pos'])
             poss = [g['pos'] for g in grp]
             contiguous = all(b - a == 1 for a, b in zip(poss, poss[1:])) and -1 not in poss
             if contiguous and len(grp) >= 3:
-                a, b = grp[0], grp[-1]
-                sel = (f"{a['mk']}「{a['label']}」～{b['mk']}「{b['label']}」の"
-                       f"いずれかを選択した場合は")
+                sel = f"{_sel_of(grp[0])}～{_sel_of(grp[-1])}のいずれかを選択した場合は"
             else:
-                sel = ('・'.join(f"{g['mk']}「{g['label']}」" for g in grp)
-                       + 'のいずれかを選択した場合は')
-        notes.append(f"G{e['xi']+1}条件「{e['name']}」で{sel}、"
-                     f"{e['ylabel']} を入力する必要はない。")
+                sel = '・'.join(_sel_of(g) for g in grp) + 'のいずれかを選択した場合は'
+        notes.append(f"G{e['xi']+1}条件で{sel}、"
+                     f"{e['ylabel']}を入力する必要はない。")
 
     return g_list, notes
 
@@ -397,55 +385,126 @@ def analyze(json_path):
     """G条件の解析結果を返す(CSV出力なし)。
 
     Returns: (bj, gen, g_list, notes)
-      g_list[i] = {'name', 'sits', 'vals', 'opt_labels', 'label2mk',
-                   'disp2label', 'numeric', 'kikaku'}
-    ③(G条件→改定後TC生成)等の他スクリプトから列⇔質問No対応を得るための共有API。
+      g_list[i] = {'name', 'sits', 'opt_labels', 'opt_raws', 'label2mk',
+                   'numeric', 'kikaku'}
+    ③(gen_tc_from_gjoken)は 'name' と 'sits' のみを使う（確定設計F F-R15）。
+
+    確定設計F: 列・選択肢・注は **G条件専用の到達走査**(gjoken_reach)から作る。
+      従来はテストケース行列の '-' パターンから帰納していたため、偽の注が出たり
+      深い枝の列が落ちたりしていた（2件目・3件目）。
+      TC生成(step2/step3)は呼ぶが **step3(テストケース生成)は実行しない**
+      （02 大型ブレーカが組合せ上限超で①ごと失敗するため。確定設計B B-3(4)）。
+      規格名計上の判定 `_has_kikaku_keijo` は JSON しか見ないので生成不要。
     """
     bj = BugakariJSON(json_path)
 
-    # --- TC生成(新規工種モード step2+step3) ---
+    # 規格名計上○の判定に ColumnTCGenerator を使う（generate() は呼ばない）
     work = tempfile.mkdtemp()
     plan_csv = os.path.join(work, 'plan.csv')
     run_plan_new(json_path, plan_csv)
     gen = ColumnTCGenerator(plan_csv, json_path)
-    rows = gen.generate()
-    g_list, notes = _derive_glist(bj, gen, rows, json_path)
 
-    # --- 網羅性補完(2026-07-06・41対応) ---
-    #   到達済み再選択可能autoを昇格して再導出し、「列・選択肢が一切失われない」
-    #   場合のみ採用(増える方向のみ許容)。玉突きで劣化する場合(例 07)は破棄。
-    plan_backup = open(plan_csv, encoding='cp932', errors='replace').read()
-    if _promote_reselectable_for_coverage(plan_csv, bj, gen, rows):
-        gen2 = ColumnTCGenerator(plan_csv, json_path)
-        try:
-            rows2 = gen2.generate()
-        except CombinationExplosionError as e:
-            # 昇格で軸が増えて上限超になった場合は、補完を諦めて元の結果(全組合せ)を使う。
-            # 補完は「増える方向のみ許容」の任意拡張なので、出せないなら無い方が正しい
-            # (2026-09-02: 43 捨石本均し 600→1,200 のような境界例への備え)。
-            with open(plan_csv, 'w', encoding='cp932', newline='') as f:
-                f.write(plan_backup)
-            print('  [網羅性補完] 昇格後の組合せが上限超 → 昇格を破棄(元の結果を使用): %s' % e)
-            gen._rows_cache = rows
-            return bj, gen, g_list, notes
-        g2, n2 = _derive_glist(bj, gen2, rows2, json_path)
-        name2opts = {}
-        for g in g2:
-            name2opts.setdefault(g['name'], set()).update(g['opt_labels'])
-        degraded = False
-        for g in g_list:
-            if g['name'] not in name2opts or \
-                    not set(g['opt_labels']) <= name2opts[g['name']]:
-                degraded = True
-                break
-        if degraded:
-            with open(plan_csv, 'w', encoding='cp932', newline='') as f:
-                f.write(plan_backup)
-            print('  [網羅性補完] 列/選択肢の喪失を検知 → 昇格を破棄(元の結果を使用)')
+    reach = analyze_reach(bj, json_path)
+    print('  [到達走査] 歩行 %d 回 / 列 %d / 注 %d'
+          % (reach['walks'], len(reach['cols']), len(reach['notes'])))
+
+    # --- 規格名計上のエコー計上変数（従来と同じ判定） ---
+    _vis = TestPlanGenerator(None, json_path)
+    echo_kikaku_vars = set()
+    for _s in bj.data.get('SitsumonItem', []):
+        _sn = _s.get('SitsumonNo')
+        if not gen._has_kikaku_keijo(_sn):
+            continue
+        if _vis._is_ui_visible_axis(_s):
+            continue
+        _s019 = bj.sitsumon019_by_no.get(_sn)
+        if not _s019:
+            continue
+        for _r in _s019.get('SitTabRows', []):
+            _v = (_r.get('AutoSelectJoken') or {}).get('VarName')
+            if _v:
+                echo_kikaku_vars.add(_v)
+
+    def _writes_vars(sit_no):
+        s019 = bj.sitsumon019_by_no.get(sit_no)
+        if not s019:
+            return set()
+        return {c.get('VarName') for c in s019.get('SitCols', []) if c.get('VarName')}
+
+    g_list = []
+    for col in reach['cols']:
+        sits = list(col['sits'])
+        opts, seen_lbl = [], set()
+        for sit in sits:
+            for rid, lbl, rawlbl in _g_options(bj, sit):
+                if lbl in seen_lbl:
+                    continue
+                seen_lbl.add(lbl)
+                opts.append((sit, rid, lbl, rawlbl))
+        opt_labels = [lbl for _, _, lbl, _ in opts]
+        opt_raws = [rl for _, _, _, rl in opts]
+        rid_of = {}
+        for _s, rid, lbl, _r in opts:
+            rid_of.setdefault(rid, lbl)
+        numeric = any((bj.sitsumon_by_no.get(s, {}) or {}).get('SitsumonKind') == 17
+                      for s in sits)
+        if numeric:
+            unit, rng = '', ''
+            for s in sits:
+                spec = numeric_input_spec(bj, s)
+                if not spec:
+                    continue
+                unit = unit or spec.get('unit') or ''
+                rng = rng or spec.get('range') or ''
+                if unit and rng:
+                    break
+            opt_labels = ['(実数入力)'] + ([f'({unit})'] if unit else [])
+            if rng:
+                opt_labels.append(f'(範囲: {rng})')
+            opt_raws = list(opt_labels)
+        label2mk = {lbl: _mk(i) for i, lbl in enumerate(opt_labels)}
+        kikaku = (any(gen._has_kikaku_keijo(int(s)) for s in sits)
+                  or any(_writes_vars(int(s)) & echo_kikaku_vars for s in sits))
+        g_list.append({'name': col['name'], 'sits': sits,
+                       'opt_labels': opt_labels, 'opt_raws': opt_raws,
+                       'label2mk': label2mk, 'numeric': numeric, 'kikaku': kikaku,
+                       '_rid_label': rid_of})
+
+    # --- 注: (x列, x選択肢row_id, y列) を「同一x・同一対象集合」で1行にまとめる ---
+    by_choice = {}
+    for xi, rid, yi in reach['notes']:
+        by_choice.setdefault((xi, rid), []).append(yi)
+    grouped = {}
+    for (xi, rid), ys in by_choice.items():
+        grouped.setdefault((xi, tuple(sorted(ys))), []).append(rid)
+
+    notes = []
+    for (xi, ys), rids in sorted(grouped.items(),
+                                 key=lambda kv: (kv[0][0], min(kv[0][1]))):
+        g = g_list[xi]
+        # 選択肢row_id → 表示ラベル → 番号（表の並びと一致させる）
+        poss = []
+        for rid in rids:
+            lbl = g['_rid_label'].get(rid)
+            poss.append(g['opt_labels'].index(lbl)
+                        if lbl in g['opt_labels'] else -1)
+        poss = sorted(p for p in poss if p >= 0)
+        # 確定設計A A-R8: 条件名を書かない短い形
+        if g['numeric'] or not poss:
+            sel = '「任意」を選択した場合は'
+        elif len(poss) == 1:
+            sel = f'{_mk(poss[0])}を選択した場合は'
         else:
-            gen, rows, g_list, notes = gen2, rows2, g2, n2
+            contiguous = all(b - a == 1 for a, b in zip(poss, poss[1:]))
+            if contiguous and len(poss) >= 3:
+                sel = f'{_mk(poss[0])}～{_mk(poss[-1])}のいずれかを選択した場合は'
+            else:
+                sel = '・'.join(_mk(p) for p in poss) + 'のいずれかを選択した場合は'
+        tgt = '、'.join(f'G{yi + 1}条件' for yi in ys)
+        notes.append(f'G{xi + 1}条件で{sel}、{tgt}を入力する必要はない。')
 
-    gen._rows_cache = rows  # ③(gen_tc_from_gjoken)が基準行の到達系列を知るための添付
+    for g in g_list:
+        g.pop('_rid_label', None)
     return bj, gen, g_list, notes
 
 

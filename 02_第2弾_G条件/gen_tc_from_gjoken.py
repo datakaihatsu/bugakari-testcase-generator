@@ -142,10 +142,13 @@ def _resolve_ref(gnum, name, cols, issues, where):
     return None
 
 
+CIRCLED_FIRST, CIRCLED_LAST = 0x2460, 0x2473   # ①..⑳
+
+
 def _strip_circled(s):
     """選択肢セルの ①..⑳ / (21) マーカーのみ除去(Gaiaコード【】は残す=表示用)。"""
-    s = s.strip()
-    if s and 0x2460 <= ord(s[0]) <= 0x2473:
+    s = str(s or '').strip()
+    if s and CIRCLED_FIRST <= ord(s[0]) <= CIRCLED_LAST:
         return s[1:].strip()
     m = re.match(r'^\((\d+)\)\s*(.+)$', s)
     if m:
@@ -153,17 +156,190 @@ def _strip_circled(s):
     return s
 
 
+def _opt_key(s):
+    """選択肢の突合キー（確定設計A A-3(1)）。
+
+    表の選択肢セルと (注) の選択肢名を**同じ手順**で正規化する。従来は表側だけ
+    正規化していたため、セルからそのままコピペした注が弾かれていた（1件目）。
+      1. 前後空白(半角/全角)を除去
+      2. 先頭の ①..⑳ / (n) マーカーを除去
+      3. 先頭の 【…】 + 続く空白 を除去
+      4. 1〜3 を変化が無くなるまで繰り返す（①【H=1】 のような二重付与に対応）
+    文字列内部の空白は触らない（v1.2.2「条件名完全一致」方針と整合）。
+    """
+    s = str(s or '').strip()
+    while True:
+        before = s
+        if s and CIRCLED_FIRST <= ord(s[0]) <= CIRCLED_LAST:
+            s = s[1:].strip()
+        m = re.match(r'^\((\d+)\)\s*(.*)$', s)
+        if m and m.group(2):
+            s = m.group(2).strip()
+        m = re.match(r'^【[^】]*】[\s　]*(.+)$', s)
+        if m:
+            s = m.group(1).strip()
+        if s == before:
+            return s
+
+
 def _strip_marker(s):
-    """選択肢セルの ①..⑳ / (21) マーカーを除去し、続けて表示併記された
-    Gaia入力条件コード(【A=1】等)も内部識別子から除去する。
-    → ①(gen_gjoken)がコードを表示併記しても、③の突合キーは従来どおり(不変)。"""
-    return re.sub(r'^【[^】]*】[\s　]+', '', _strip_circled(s)).strip()
+    """後方互換の別名（突合キー生成は _opt_key に一本化）。"""
+    return _opt_key(s)
+
+
+def _marker_index(s):
+    """先頭の ①..⑳ / (n) マーカー → 0始まりの選択肢番号。無ければ None。"""
+    s = str(s or '').strip()
+    if s and CIRCLED_FIRST <= ord(s[0]) <= CIRCLED_LAST:
+        return ord(s[0]) - CIRCLED_FIRST
+    m = re.match(r'^\((\d+)\)', s)
+    return int(m.group(1)) - 1 if m else None
+
+
+def _mk_disp(i):
+    """選択肢番号 → ①..⑳ / (21)（gen_gjoken._mk と同じ規則）。"""
+    return chr(CIRCLED_FIRST + i) if i < 20 else f'({i + 1})'
+
+
+def _split_note(raw):
+    """(注)1行を分解する（確定設計A A-3(3)）。
+
+    「G<番号>条件[「名称」]で<選択肢>を選択した場合は、<対象>…（語尾）」
+    条件名は**省略可**（A-R1）。従来は 条件名の「」を必須にしていたため、
+    赤本と同じ短い形（`G2条件で②を選択した場合は、…`）が文型として認識されなかった。
+
+    戻り値: (src_num, src_name, sel_part, tgt_part) / 読めなければ None
+    """
+    m = re.search(r'G(\d+)条件', raw)
+    if not m:
+        return None
+    src_num, p = int(m.group(1)), m.end()
+    src_name = ''
+    if raw[p:p + 1] == '「':
+        spans = _quoted_spans(raw[p:])
+        if spans:
+            src_name = spans[0]
+            p += len(src_name) + 2
+    if raw[p:p + 1] != 'で':
+        return None
+    p += 1
+    m2 = re.search(r'(?:のいずれか)?を選択した場合は、', raw[p:])
+    if not m2:
+        return None
+    sel_part = raw[p:p + m2.start()]
+    rest = raw[p + m2.end():]
+    m3 = re.search(_NOTE_TAIL, rest)
+    if not m3:
+        return None
+    return src_num, src_name, sel_part, rest[:m3.start()].strip()
+
+
+def _parse_targets(tgt_part, cols, gnums, issues, where):
+    """対象側「Gy条件[「名」]」の並びを列indexのリストへ（確定設計A A-R3）。名称は省略可。
+
+    範囲表記（3件目(a2)・静的破砕工 01_#631696 の書き方）も展開する:
+        G3条件～G5条件 / G2～G4条件 → 間の列も含める
+    従来は `G(\\d+)条件` を拾うだけで、`G3条件～G5条件` は G3 と G5 しか取らず
+    **G4 が WARN も出さずに落ちて**いた（③のTCが静かに間違う）。
+    `～` が無ければ従来どおりの解釈なので、①が出す「、」区切りには影響しない。
+    """
+    refs = []
+    for m in re.finditer(r'G(\d+)(?:条件)?', tgt_part):
+        rest = tgt_part[m.end():]
+        nm = ''
+        end = m.end()
+        if rest[:1] == '「':
+            spans = _quoted_spans(rest)
+            if spans:
+                nm = spans[0]
+                end += len(nm) + 2
+        refs.append({'num': int(m.group(1)), 'name': nm,
+                     'start': m.start(), 'end': end})
+    out = []
+    i = 0
+    while i < len(refs):
+        cur = refs[i]
+        # 直後の参照との間が「(条件)? ～ 」だけなら範囲とみなす
+        if i + 1 < len(refs):
+            gap = tgt_part[cur['end']:refs[i + 1]['start']]
+            if re.fullmatch(r'[\s　]*(?:条件)?[\s　]*[～~〜][\s　]*', gap):
+                a = _resolve_ref_g(cur['num'], cur['name'], cols, gnums, issues, where)
+                b = _resolve_ref_g(refs[i + 1]['num'], refs[i + 1]['name'],
+                                   cols, gnums, issues, where)
+                if a is not None and b is not None:
+                    lo, hi = (a, b) if a <= b else (b, a)
+                    for t in range(lo, hi + 1):
+                        if t not in out:
+                            out.append(t)
+                    i += 2
+                    continue
+        t = _resolve_ref_g(cur['num'], cur['name'], cols, gnums, issues, where)
+        if t is not None and t not in out:
+            out.append(t)
+        i += 1
+    return out
+
+
+def _resolve_ref_g(gnum, name, cols, gnums, issues, where):
+    """注中の G番号 / 名称 を列indexへ。名称省略時は WARN を出さない（A-R5）。"""
+    if name:
+        return _resolve_ref(gnums.index(gnum) if gnum in gnums else gnum - 1,
+                            name, cols, issues, where)
+    if gnum in gnums:
+        return gnums.index(gnum)
+    issues.append({
+        'level': 'ERROR',
+        'text': (f'{where}: 条件表に G{gnum} がありません(全{len(cols)}列)。'
+                 f'この注は無視されます。')})
+    return None
+
+
+def _resolve_choices(sel_part, col, issues, where):
+    """選択肢部を選択肢indexのリストへ（確定設計A A-R2）。
+
+    「」があれば文字で突合（両側 _opt_key で正規化）、無ければ先頭の印で引く。
+    `①～③のいずれか` は範囲展開。実数入力列は「任意」等をその列の値として受理。
+    戻り値: [(index or -1(=任意), 表示用ラベル), ...]。解決できない要素は index=None
+    """
+    labels = [x.strip() for x in _quoted_spans(sel_part)]
+    opts = col['opts']
+    if labels:
+        idxs = []
+        for lb in labels:
+            key = _opt_key(lb)
+            if col['numeric'] and (key == '任意' or key in opts):
+                idxs.append((-1, lb))
+                continue
+            idxs.append((opts.index(key) if key in opts else None, lb))
+        if '～' in sel_part and len(idxs) == 2 and all(i is not None and i >= 0
+                                                      for i, _ in idxs):
+            a, b = idxs[0][0], idxs[1][0]
+            if a <= b:
+                return [(i, opts[i]) for i in range(a, b + 1)]
+        return idxs
+    marks = []
+    for ch in sel_part:
+        if CIRCLED_FIRST <= ord(ch) <= CIRCLED_LAST:
+            marks.append(ord(ch) - CIRCLED_FIRST)
+    marks += [int(x) - 1 for x in re.findall(r'\((\d+)\)', sel_part)]
+    if '～' in sel_part and len(marks) == 2 and marks[0] <= marks[1]:
+        marks = list(range(marks[0], marks[1] + 1))
+    if not marks:
+        if col['numeric']:
+            return [(-1, '任意')]
+        return [(None, sel_part.strip())]
+    out = []
+    for i in marks:
+        out.append((i if 0 <= i < len(opts) else None,
+                    opts[i] if 0 <= i < len(opts) else f'{i + 1}番目'))
+    return out
 
 
 def read_gjoken(path):
     """G条件CSV → {'cols': [{name, opts, numeric, kikaku}], 'notes': [...]}"""
     rows = _read_csv_any(path)
     cols = []
+    gnums = []
     names = []
     kikaku = []
     n = 0
@@ -192,6 +368,13 @@ def read_gjoken(path):
             n = len(row) - 1
             cols = [{'name': '', 'opts': [], 'opts_raw': [], 'numeric': False, 'kikaku': False}
                     for _ in range(n)]
+            # ヘッダ行の G番号ラベル。人が列を挿入して G22 等に振り直すことがあるため、
+            #   並び位置ではなくラベルで注の参照を解決する。ラベルが G数字 でない列は位置で補う。
+            gnums = []
+            for i in range(n):
+                lbl = (row[i + 1] or '').strip()
+                mnum = re.fullmatch(r'G(\d+)', lbl)
+                gnums.append(int(mnum.group(1)) if mnum else i + 1)
             continue
         if head == '規格名計上':
             for i in range(n):
@@ -221,74 +404,88 @@ def read_gjoken(path):
     notes = []
     issues = []
     parsed = 0
+    lint_lines = []
+    if not gnums:
+        gnums = list(range(1, len(cols) + 1))
     for ni, raw in enumerate(notes_raw, 1):
         where = f'注{ni}'
-        m = _NOTE_PAT.search(raw)
-        if not m:
+        sp = _split_note(raw)
+        if sp is None:
             if _NOTE_LIKE.search(raw):
                 issues.append({
                     'level': 'ERROR',
                     'text': (f'{where}: 文の形が想定外でテストケースに反映できません'
-                             f'(この注は無視されます)。「Gx条件「A」で①「B」を選択した'
-                             f'場合は、Gy条件「C」を入力する必要はない。」の形に直して'
-                             f'ください。 → {raw}')})
+                             f'(この注は無視されます)。「G2条件で②を選択した場合は、'
+                             f'G3条件を入力する必要はない。」の形に直してください。'
+                             f' → {raw}')})
             continue
-        src_g = _resolve_ref(int(m.group(1)) - 1, m.group(2).strip(), cols, issues,
-                             f'{where}(条件側)')
+        src_num, src_name_in, sel_part, tgt_part = sp
+        src_g = _resolve_ref_g(src_num, src_name_in, cols, gnums, issues,
+                               f'{where}(条件側)')
         if src_g is None:
             continue
         src_name = cols[src_g]['name']
-        sel_part = m.group(3)
-        # 対象列: 「Gy条件「名」」の番号と名称の対で解決(名称優先)。
-        pairs = []
-        tgt_part = m.group(4)
-        for mt in re.finditer(r'G(\d+)条件', tgt_part):
-            rest = tgt_part[mt.end():]
-            sp = _quoted_spans(rest) if rest[:1] == '「' else []
-            pairs.append((mt.group(1), sp[0] if sp else ''))
-        targets = []
-        for gs, nm in pairs:
-            t = _resolve_ref(int(gs) - 1, (nm or '').strip(), cols, issues,
-                             f'{where}(対象側)')
-            if t is not None and t not in targets:
-                targets.append(t)
+        targets = _parse_targets(tgt_part, cols, gnums, issues, f'{where}(対象側)')
         if not targets:
             continue
-        labels = [x.strip() for x in _quoted_spans(sel_part)]
-        if '～' in sel_part and len(labels) == 2:
-            opts = cols[src_g]['opts']
-            try:
-                i0, i1 = opts.index(labels[0]), opts.index(labels[1])
-                if 0 <= i0 <= i1:
-                    labels = opts[i0:i1 + 1]
-            except ValueError:
-                pass
+        choices = _resolve_choices(sel_part, cols[src_g], issues, where)
         before = len(notes)
-        for lbl in labels:
-            # 実数入力の条件を起点にした注: ①(gen_gjoken)自身が「任意」と書き出すため
-            #   (例「G9条件「1m当りチェアーの使用量」で「任意」を選択した場合は…」)、
-            #   実数列の値表現(任意/(実数入力)/(単位)) はその列の値として受け入れる。
-            #   TC側も実数列は「任意」と出力するので、突合キーは「任意」へ寄せる。
-            #   (2026-08-27: ①が書いた注を③が弾いてERRORにしていた自己不整合の是正。
-            #    「任意」以外の不一致は従来どおりERRORなので誤記の検知力は落ちない)
-            if cols[src_g]['numeric'] and (lbl == '任意' or lbl in cols[src_g]['opts']):
-                notes.append({'src_g': src_g, 'src_name': src_name,
-                              'src_choice': '任意', 'targets': targets})
-                continue
-            if lbl not in cols[src_g]['opts']:
+        for idx, shown in choices:
+            if idx is None:
                 issues.append({
                     'level': 'ERROR',
-                    'text': (f'{where}: 選択肢「{lbl}」が条件「{src_name}」の'
+                    'text': (f'{where}: 選択肢「{shown}」が条件「{src_name}」の'
                              f'選択肢に存在しません(候補: '
                              f'{" / ".join(cols[src_g]["opts"])})。'
                              f'この条件分岐はテストケースに反映されません。')})
                 continue
+            choice = '任意' if idx < 0 else cols[src_g]['opts'][idx]
             notes.append({'src_g': src_g, 'src_name': src_name,
-                          'src_choice': lbl, 'targets': targets})
+                          'src_choice': choice, 'targets': targets})
         if len(notes) > before:
             parsed += 1
-    return {'cols': cols, 'notes': notes, 'note_issues': issues,
+            # 確定設計A A-R9: 番号を名前へ展開した解釈結果（出力Excelの2枚目シート用）
+            sel_txt = ' / '.join(
+                ('任意' if i < 0 else f'{_mk_disp(i)}{cols[src_g]["opts"][i]}')
+                for i, _ in choices if i is not None)
+            tgt_txt = '・'.join(f'G{gnums[t]}「{cols[t]["name"]}」' for t in targets)
+            lint_lines.append({
+                'no': where, 'status': '反映',
+                'src': f'G{gnums[src_g]} {src_name}', 'sel': sel_txt,
+                'tgt': tgt_txt, 'raw': raw})
+        else:
+            lint_lines.append({'no': where, 'status': '未反映', 'src': '', 'sel': '',
+                               'tgt': '', 'raw': raw})
+    for ni, raw in enumerate(notes_raw, 1):
+        if not any(x['no'] == f'注{ni}' for x in lint_lines):
+            lint_lines.append({'no': f'注{ni}', 'status': '未反映', 'src': '',
+                               'sel': '', 'tgt': '', 'raw': raw})
+    lint_lines.sort(key=lambda x: int(x['no'][1:]))
+    return {'cols': cols, 'gnums': gnums, 'notes': notes,
+            'note_issues': issues, 'note_lines': lint_lines,
             'note_raw_count': len(notes_raw), 'note_parsed_count': parsed}
+
+
+def note_sheet_rows(g, label='改修後G条件'):
+    """(注)の解釈を出力Excelの2枚目シート用の表にする（確定設計A A-R9）。
+
+    条件名を書かない短い書式を正式にした結果、番号のずれを機械で検知する手立てが
+    無くなる（A-3の割り切り）。このシートが唯一の確認手段なので、注ごとに
+    「番号を名前へ展開した解釈」を出す。
+    """
+    rows = [['注', '判定', '条件', '選択肢', '入力不要になる条件', '原文']]
+    for ln in (g.get('note_lines') or []):
+        rows.append([ln.get('no', ''), ln.get('status', ''), ln.get('src', ''),
+                     ln.get('sel', ''), ln.get('tgt', ''), ln.get('raw', '')])
+    issues = g.get('note_issues') or []
+    if issues:
+        rows.append([])
+        rows.append(['指摘', '', '', '', '', ''])
+        for it in issues:
+            rows.append(['', it.get('level', ''), it.get('text', ''), '', '', ''])
+    if len(rows) == 1:
+        rows.append(['', '(注) はありません', '', '', '', ''])
+    return rows
 
 
 def note_lint(g, label='改修後G条件'):
@@ -1562,6 +1759,28 @@ def build_tc_from_single_gjoken(g30):
                 parts.append(f'・「{vlabel}」選択時は {tstr} が入力対象外(不要)になっていること')
         return '\n'.join(parts)
 
+    # 確定設計C C-R9: 数量入力列に範囲があれば確認観点に出す。
+    #   ③本体(generate_csv)と同じ観点を、新規歩掛タブでも出すため。
+    #   範囲は①が G条件表に「(範囲: 0 < 値)」セルとして書き出している。
+    range_checks = []
+    for i, c in enumerate(cols):
+        if not c.get('numeric'):
+            continue
+        rng = ''
+        unit = ''
+        for o in (c.get('opts') or []):
+            m = re.match(r'^\(範囲:\s*(.+?)\)$', str(o).strip())
+            if m:
+                rng = m.group(1).strip()
+                continue
+            m2 = re.match(r'^\((?!実数入力|範囲:)(.+?)\)$', str(o).strip())
+            if m2:
+                unit = m2.group(1).strip()
+        if rng:
+            u = f'（単位: {unit}）' if unit else ''
+            range_checks.append((i, f"・{c.get('name', '')} は 範囲 {rng} の値のみ有効{u}。"
+                                    f"範囲外を入力すると警告が出ること"))
+
     out = [header]
     first = True
     for kind, cond, vi, vlabel in plan:
@@ -1580,6 +1799,10 @@ def build_tc_from_single_gjoken(g30):
             if cols[vi].get('kikaku'):
                 kikaku = (f"・{cols[vi].get('name', '')} の規格名計上が"
                           f"意図通りの場所に正しく計上されているか")
+        rc = [t for i, t in range_checks if cond[i] not in ('', '-')]
+        if rc:
+            joined = '\n'.join(rc)
+            kanten = (kanten + '\n' + joined) if kanten else joined
         row += [daika, kanten, kikaku]
         out.append(row)
 

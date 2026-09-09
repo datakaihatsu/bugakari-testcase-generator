@@ -146,9 +146,15 @@ _JSON43 = os.path.join(_PARENT, '..', '工種別',
 
 
 @unittest.skipUnless(os.path.exists(_JSON43), '43 実データ未配置')
-class TestGen2OverCapFallsBack(unittest.TestCase):
-    """網羅性補完(gen2)だけが上限超になる境界例: 補完を破棄して元の結果を使う。
-    43 は gen=600 / gen2=1,200。上限を 1,000 に落とすと gen2 だけが超える。"""
+class TestGjokenIndependentOfTcCap(unittest.TestCase):
+    """確定設計F(2026-09-09)以降: ①(G条件生成)はテストケースの組合せ上限に依存しない。
+
+    旧: analyze() が step3 を実行し、網羅性補完(gen2)が上限超なら補完を破棄していた
+        （43 は gen=600 / gen2=1,200）。
+    新: 列と注は G条件専用の到達走査(gjoken_reach)から作り、step3 は実行しない。
+        よって TC 側の上限を極端に下げても ① は成功する
+        （02 大型ブレーカのように TC 側が上限超になる歩掛でも ① を出せるようにするため）。
+    """
 
     def setUp(self):
         self._cap = ColumnTCGenerator.MAX_FULL_COMBOS
@@ -156,25 +162,24 @@ class TestGen2OverCapFallsBack(unittest.TestCase):
     def tearDown(self):
         ColumnTCGenerator.MAX_FULL_COMBOS = self._cap
 
-    def test_gen2_over_cap_uses_gen_result(self):
+    def test_gjoken_succeeds_even_with_tiny_tc_cap(self):
         import gen_gjoken
-        ColumnTCGenerator.MAX_FULL_COMBOS = 1000
+        ColumnTCGenerator.MAX_FULL_COMBOS = 10
         buf = io.StringIO()
         with contextlib.redirect_stdout(buf):
-            _bj, gen, g_list, notes = gen_gjoken.analyze(_JSON43)
-        self.assertIn('昇格を破棄', buf.getvalue())
-        self.assertTrue(g_list)
-        self.assertTrue(notes)          # 「注なし」にはならない(gen の全組合せから導出)
-        self.assertIsNotNone(getattr(gen, '_rows_cache', None))
+            _bj, _gen, g_list, notes = gen_gjoken.analyze(_JSON43)
+        self.assertTrue(g_list, 'TC上限に引きずられて列が出ない')
+        self.assertTrue(notes, 'TC上限に引きずられて注が出ない')
+        self.assertIn('[到達走査]', buf.getvalue())
 
-    def test_default_cap_runs_gen2_full(self):
+    def test_default_cap_is_clean(self):
         import gen_gjoken
         buf = io.StringIO()
         with contextlib.redirect_stdout(buf):
             gen_gjoken.analyze(_JSON43)
         log = buf.getvalue()
-        self.assertNotIn('組合せ上限', log)   # 既定上限 3,000 では両インスタンス全組合せ
-        self.assertNotIn('昇格を破棄', log)
+        self.assertNotIn('組合せ上限', log)
+        self.assertIn('[到達走査]', log)
 
 
 if __name__ == '__main__':
