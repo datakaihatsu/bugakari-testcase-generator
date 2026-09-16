@@ -476,7 +476,7 @@ class ColumnTCGenerator:
 
     def _child_daika_checks(self):
         """新提案B (#15 FB) + 運転費拡張 (2026-06-23 #43): 子代価(Sitsumon011)・
-        運転費(Sitsumon014)へ送る変数の増減・計上先変更・**値変更**を差分検知し、
+        運転費(Sitsumon014)へ送る変数の増減・呼出工種変更・計上先変更・**値変更**を差分検知し、
         「○○の選択肢/計上が意図通りか」の確認観点を出す。
         例: #15 鉄筋工 F2削除/F7追加・計上先28968→20301 / #43 運転費 送り変数KGの値270→320。"""
         if getattr(self, '_child_daika_cache', None) is not None:
@@ -498,10 +498,17 @@ class ColumnTCGenerator:
             def _valstr(k):
                 return k.get('Value') if k.get('Value') is not None else k.get('Expression')
 
-            # Sitsumon011=子代価(計上先=KeijoSakiTankaCD) / Sitsumon014=運転費(計上先=DefaultKoshuCD)
-            for key, label, keijo_f, suffix in (
-                    ('Sitsumon011', '子代価', 'KeijoSakiTankaCD', '選択肢'),
-                    ('Sitsumon014', '運転費', 'DefaultKoshuCD', '計上')):
+            def _fld_changed(o, n, fld):
+                return str(o.get(fld) or '') != str(n.get(fld) or '')
+
+            # Sitsumon011=子代価 / Sitsumon014=運転費。両者は同一構造で、フィールドの意味は
+            #   DefaultKoshuCD   = 呼出工種（実行時に呼び出す子工種）
+            #   KeijoSakiTankaCD = 計上先（結果を計上する親代価表側の単価）
+            # (内部仕様書 追補4 §4-1・2026-09-16 ソース確定)。旧実装は 011=計上先のみ /
+            # 014=呼出工種のみを見て双方「計上先変更」と出しており、逆側の変更を取りこぼしていた。
+            for key, label, suffix in (
+                    ('Sitsumon011', '子代価', '選択肢'),
+                    ('Sitsumon014', '運転費', '計上')):
                 om = {e['SitsumonNo']: e for e in base.data.get(key, [])}
                 for n in self.new_json.data.get(key, []):
                     no = n['SitsumonNo']
@@ -522,7 +529,8 @@ class ColumnTCGenerator:
                                 (ok_.get('Value'), ok_.get('Expression'))
                                 != (nk_.get('Value'), nk_.get('Expression'))):
                             val_changed.append(f'{cv}:{_valstr(ok_)}→{_valstr(nk_)}')
-                    keijo = (str(o.get(keijo_f) or '') != str(n.get(keijo_f) or ''))
+                    koshu_ch = _fld_changed(o, n, 'DefaultKoshuCD')
+                    keijo_ch = _fld_changed(o, n, 'KeijoSakiTankaCD')
                     bits = []
                     if added:
                         bits.append('追加:' + ','.join(added))
@@ -530,11 +538,13 @@ class ColumnTCGenerator:
                         bits.append('削除:' + ','.join(removed))
                     if val_changed:
                         bits.append('値変更:' + ','.join(val_changed))
-                    if bits or keijo:
+                    if bits or koshu_ch or keijo_ch:
                         nm = self.new_json.get_sitsumon_name(no)
                         detail = ('送り変数の変更 ' + ' '.join(bits)) if bits else ''
-                        if keijo:
-                            detail = (detail + ' / ' if detail else '') + '計上先変更'
+                        for changed, lbl in ((koshu_ch, '呼出工種変更'),
+                                             (keijo_ch, '計上先変更')):
+                            if changed:
+                                detail = (detail + ' / ' if detail else '') + lbl
                         out.append((no, f'・{label}「{nm}」の{suffix}が意図通りか({detail})'))
         self._child_daika_cache = out
         return out
