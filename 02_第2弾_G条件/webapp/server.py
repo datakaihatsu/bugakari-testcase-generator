@@ -19,6 +19,8 @@ http.server ベース。127.0.0.1 バインドの単一ユーザ用ローカル�
   POST /api/gen_tc           {g30_b64,g30_name, use_session_g20|g20_b64} → TC生成（テストケース_xlsx）
   GET  /api/settings         現在の格納場所・出所（既定/ユーザ設定）・実在チェック
   POST /api/settings         {action: derive|check|save|reset} 格納場所の変更（画面の「変更」）
+  GET  /api/report_info?tab= 「問題・要望を送る」ダイアログ用（送信者・送る内容・弾かれた注）
+  POST /api/report           {tab, kind, comment, notes} 直近の実行を報告パック(zip)にして報告箱へ保存
 
 設計書: 運用化設計書_2026-07-07.md §9。
 """
@@ -37,6 +39,7 @@ if _HERE not in sys.path:
     sys.path.insert(0, _HERE)
 
 import service
+import report
 import version
 
 STATIC_DIR = os.path.join(_HERE, 'static')
@@ -46,6 +49,9 @@ CFG = service.load_config()
 _DOWNLOADS = {}
 # ①の結果を③へ引き継ぐための単一ユーザ用セッション（ローカルアプリ前提）。
 _SESSION = {'g20_csv': None, 'old_json': None, 'koshu': None}
+# 「問題・要望を送る」用に、タブごとの直近の実行を覚えておく（tab → run）。
+# クライアントからはパスを受け取らず、ここに記録したものだけを zip に入れる。
+_LAST_RUN = {}
 
 _CT_XLSX = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
 _CT_BY_EXT = {'.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8',
@@ -59,6 +65,19 @@ def _reload_cfg():
     CFG.clear()
     CFG.update(fresh)
     return CFG
+
+
+def _remember_run(tab, r, inputs=(), json_name='', koshu=''):
+    """報告パック用に実行内容を記録する。inputs = [(zip内の名前, 実パス)]。"""
+    files = list(inputs)
+    if r.get('xlsx_path'):
+        files.append(('出力/' + os.path.basename(r['xlsx_path']), r['xlsx_path']))
+    if not koshu and r.get('xlsx_path'):
+        koshu = os.path.splitext(os.path.basename(r['xlsx_path']))[0]
+        koshu = koshu.replace('テストケース_', '').replace('商品_', '')
+    _LAST_RUN[tab] = {'tab': tab, 'files': files, 'note_lint': r.get('note_lint') or [],
+                      'log': r.get('log') or '', 'error': r.get('error') or '',
+                      'json_name': json_name, 'koshu': koshu, 'tc_count': r.get('tc_count')}
 
 
 def _register_download(path):
@@ -146,6 +165,9 @@ class Handler(BaseHTTPRequestHandler):
             self._send_json(service.settings_state(CFG))
         elif route == '/api/download':
             self._serve_download(parsed.query)
+        elif route == '/api/report_info':
+            tab = urllib.parse.parse_qs(parsed.query).get('tab', ['general'])[0]
+            self._send_json(report.preview(_LAST_RUN.get(tab), CFG))
         else:
             self._send_json({'error': 'not found'}, 404)
 
@@ -163,6 +185,8 @@ class Handler(BaseHTTPRequestHandler):
                 self._api_gen_tc_new()
             elif route == '/api/settings':
                 self._api_settings()
+            elif route == '/api/report':
+                self._api_report()
             else:
                 self._send_json({'error': 'not found'}, 404)
         except Exception as e:  # noqa: BLE001 UIへ返す
@@ -233,6 +257,15 @@ class Handler(BaseHTTPRequestHandler):
         st.update({'error': None, 'saved': True, 'message': msg})
         self._send_json(st)
 
+    def _api_report(self):
+        body = self._read_json()
+        tab = body.get('tab') or 'general'
+        notes = body.get('notes') or []
+        if not isinstance(notes, list):
+            notes = []
+        self._send_json(report.save_report(_LAST_RUN.get(tab), body.get('kind'),
+                                           body.get('comment'), notes, CFG))
+
     def _api_locate(self):
         body = self._read_json()
         text = (body.get('input') or '').strip()
@@ -245,6 +278,7 @@ class Handler(BaseHTTPRequestHandler):
         body = self._read_json()
         json_path = body.get('json_path') or ''
         r = service.gen_g(json_path, CFG)
+        _remember_run('g', r, json_name=os.path.basename(json_path))
         if r['error']:
             self._send_json(r)
             return
@@ -293,6 +327,10 @@ class Handler(BaseHTTPRequestHandler):
                 self._send_json({'error': '改定前JSONが特定できません。先に①を実行してください'})
                 return
         r = service.gen_tc(g20, g30, old_json, CFG)
+        _remember_run('tc', r, inputs=[('入力/枠A_' + os.path.basename(g20), g20),
+                                       ('入力/枠B_' + os.path.basename(g30), g30)],
+                      json_name=os.path.basename(old_json),
+                      koshu=_SESSION.get('koshu') if body.get('use_session_g20') else '')
         if not r['error']:
             r['download_token'] = _register_download(r['xlsx_path'])
             r['download_name'] = os.path.basename(r['xlsx_path'])
@@ -307,6 +345,7 @@ class Handler(BaseHTTPRequestHandler):
         wd = service.new_workdir(CFG, 'uploadnew_')
         g30 = self._decode_upload(body['g30_b64'], body.get('g30_name'), wd, '30新規歩掛.xlsx')
         r = service.gen_tc_new(g30, CFG)
+        _remember_run('tcnew', r, inputs=[('入力/枠C_' + os.path.basename(g30), g30)])
         if not r['error']:
             r['download_token'] = _register_download(r['xlsx_path'])
             r['download_name'] = os.path.basename(r['xlsx_path'])

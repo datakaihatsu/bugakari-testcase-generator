@@ -112,3 +112,29 @@ details.log pre {
 .setdetail summary { cursor: pointer; font-size: 13px; color: var(--hint); }
 .checklist { margin: 6px 0; padding-left: 20px; }
 .checklist li { margin: 2px 0; }
+
+/* 問題・要望を送る（報告パック） */
+.titleright { display: flex; align-items: center; gap: 12px; }
+.reportbtn { background: var(--card); color: var(--accent); border: 1px solid var(--accent);
+  padding: 4px 12px; font-size: 13px; border-radius: 14px; }
+.reportbtn:hover { background: var(--cond); }
+.reportdlg { border: 1px solid var(--border); border-radius: 10px; padding: 20px 24px;
+  width: min(640px, calc(100vw - 32px)); background: var(--card); color: var(--fg); }
+.reportdlg::backdrop { background: rgba(0, 0, 0, .35); }
+.reportdlg textarea { width: 100%; padding: 8px 10px; border: 1px solid var(--border);
+  border-radius: 6px; background: var(--bg); color: var(--fg); font: inherit; resize: vertical; }
+.rp-target { margin: 0 0 4px; display: block; }
+.rp-notes { max-height: 160px; overflow-y: auto; border: 1px solid var(--border);
+  border-radius: 6px; padding: 4px 8px; background: var(--log-bg); }
+.rp-note { display: flex; gap: 6px; align-items: flex-start; font-weight: 400; margin: 4px 0;
+  font-size: 13px; }
+.rp-note input { margin-top: 4px; }
+.rp-meta { margin: 10px 0 4px; font-size: 13px; }
+.rp-files { font-size: 13px; margin: 4px 0; }
+.rp-files summary { cursor: pointer; color: var(--hint); }
+.rp-files ul { margin: 4px 0; padding-left: 20px; }
+.rp-files .hint { display: block; margin-left: 0; }
+.rp-actions { justify-content: flex-end; margin-top: 14px; }
+.rp-path { display: block; word-break: break-all; background: var(--log-bg); padding: 4px 6px;
+  border-radius: 4px; margin-top: 4px; }
+.warn { color: var(--warn); }

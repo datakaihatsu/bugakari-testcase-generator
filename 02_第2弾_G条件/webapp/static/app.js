@@ -37,6 +37,10 @@ function logBlock(r) {
   if (!r.log) return '';
   return `<details class="log"><summary>実行ログ</summary><pre>${esc(r.log)}</pre></details>`;
 }
+// 結果欄に置く「問題・要望を送る」。直近の実行（そのタブ）のデータを添えて送る
+function reportBtn(tab) {
+  return `<div class="row"><button type="button" class="reportbtn" data-tab="${tab}">📮 この結果について問題・要望を送る</button></div>`;
+}
 function fileToBase64(file) {
   return new Promise((resolve, reject) => {
     const fr = new FileReader();
@@ -133,11 +137,12 @@ $('btnGenG').addEventListener('click', async () => {
   $('btnGenG').disabled = true;
   const r = await postJSON('/api/gen_g', { json_path: selectedJsonPath });
   $('btnGenG').disabled = false;
-  if (r.error) { box.innerHTML = `<span class="err">${esc(r.error)}</span>${logBlock(r)}`; return; }
+  if (r.error) { box.innerHTML = `<span class="err">${esc(r.error)}</span>${reportBtn('g')}${logBlock(r)}`; return; }
   const verLabel = r.apply_ymd ? `適用 ${r.apply_ymd} 版・` : '';
   box.innerHTML = `<div class="summary ok">G条件を生成しました（${verLabel}条件 ${r.g_count} 個 / 注 ${r.note_count} 件）</div>`
     + dlLink(r)
     + '<div class="hint">この「商品」xlsxをExcelで改修後の内容に編集し、③の枠Bに投入してください。</div>'
+    + reportBtn('g')
     + logBlock(r);
   refreshHandoff();
 });
@@ -170,11 +175,12 @@ $('btnGenTC').addEventListener('click', async () => {
   const r = await postJSON('/api/gen_tc', body);
   $('tcSpinner').classList.add('hidden');
   $('btnGenTC').disabled = false;
-  if (r.error) { box.innerHTML = `<span class="err">${esc(r.error)}</span>${logBlock(r)}`; return; }
+  if (r.error) { box.innerHTML = `<span class="err">${esc(r.error)}</span>${noteLintBlock(r)}${reportBtn('tc')}${logBlock(r)}`; return; }
   box.innerHTML = `<div class="summary ok">テストケースを生成しました（TC ${r.tc_count} 件 / 列 ${r.col_count}）</div>`
     + noteLintBlock(r)
     + dlLink(r)
     + '<div class="hint">条件（積算で選ぶ）列の見出しは色付き。生成後は必ず人が目視レビューしてください。</div>'
+    + reportBtn('tc')
     + logBlock(r);
 });
 
@@ -189,11 +195,12 @@ $('btnGenTCNew').addEventListener('click', async () => {
   const r = await postJSON('/api/gen_tc_new', { g30_b64: await fileToBase64(f), g30_name: f.name });
   $('tcNewSpinner').classList.add('hidden');
   $('btnGenTCNew').disabled = false;
-  if (r.error) { box.innerHTML = `<span class="err">${esc(r.error)}</span>${logBlock(r)}`; return; }
+  if (r.error) { box.innerHTML = `<span class="err">${esc(r.error)}</span>${noteLintBlock(r)}${reportBtn('tcnew')}${logBlock(r)}`; return; }
   box.innerHTML = `<div class="summary ok">テストケースを生成しました（TC ${r.tc_count} 件 / 列 ${r.col_count}）</div>`
     + noteLintBlock(r)
     + dlLink(r)
     + '<div class="hint">条件列の見出しは色付き。2件目以降のパターンは、直前の行と変わった選択肢セルが色付きです。生成後は必ず人が目視レビューしてください。</div>'
+    + reportBtn('tcnew')
     + logBlock(r);
 });
 
@@ -282,6 +289,63 @@ $('btnSetReset').addEventListener('click', async () => {
   $('setFile').textContent = `設定の保存先: ${r.settings_file}（未作成＝配布既定を使用中）`;
   setMsg(`<div class="summary ok">${esc(r.message)}</div>${checkBlock(r.check)}`);
   loadConfig();
+});
+
+// ---- 問題・要望を送る（報告パック） ----
+// 2026-10-20 FB: 弾かれた注などを、再現データ付きで開発者へ簡単に渡せるようにする。
+// 送る中身はサーバが直近の実行から組み立てる（ここからはタブ名しか送らない）。
+let reportTab = 'general';
+
+async function openReport(tab) {
+  reportTab = tab || 'general';
+  $('rpResult').innerHTML = '';
+  $('rpComment').value = '';
+  $('rpSend').disabled = false;
+  $('rpSend').classList.remove('hidden');
+  $('rpCancel').textContent = 'キャンセル';
+  document.querySelector('input[name=rpKind][value="問題"]').checked = true;
+  const info = await (await fetch('/api/report_info?tab=' + encodeURIComponent(reportTab))).json();
+  $('rpUser').textContent = info.user;
+  $('rpDir').textContent = info.report_dir;
+  $('rpTarget').textContent = info.tab === 'general'
+    ? '実行データは添付しません（要望・問題の文章だけを送ります）'
+    : `対象: ${info.tab_label}${info.koshu ? '　' + info.koshu : ''}${info.has_error ? '（エラーあり）' : ''}`;
+  $('rpFiles').innerHTML = info.files.map((f) => `<li>${esc(f)}</li>`).join('');
+  $('rpNotes').innerHTML = info.notes.map((n, i) =>
+    `<label class="rp-note"><input type="checkbox" value="${i}"> <span>${esc(n)}</span></label>`).join('');
+  $('rpNotes').dataset.notes = JSON.stringify(info.notes);
+  $('rpNotesBox').classList.toggle('hidden', !info.notes.length);
+  if (!info.reachable) {
+    $('rpResult').innerHTML = '<div class="warn">共有ドライブが見つかりません。保存するとこのPC内に置かれるので、そのファイルをチャンネルに添付してください。</div>';
+  }
+  $('reportDlg').showModal();
+  $('rpComment').focus();
+}
+
+document.addEventListener('click', (e) => {
+  const b = e.target.closest('.reportbtn');
+  if (b) openReport(b.dataset.tab);
+});
+$('rpCancel').addEventListener('click', () => $('reportDlg').close());
+$('rpSend').addEventListener('click', async () => {
+  const all = JSON.parse($('rpNotes').dataset.notes || '[]');
+  const notes = Array.from($('rpNotes').querySelectorAll('input:checked')).map((c) => all[Number(c.value)]);
+  const kind = document.querySelector('input[name=rpKind]:checked').value;
+  $('rpSend').disabled = true;
+  $('rpResult').innerHTML = '保存中…';
+  const r = await postJSON('/api/report', { tab: reportTab, kind, notes, comment: $('rpComment').value });
+  if (r.error) {
+    $('rpResult').innerHTML = `<span class="err">${esc(r.error)}</span>`;
+    $('rpSend').disabled = false;
+    return;
+  }
+  $('rpResult').innerHTML = r.shared
+    ? `<div class="summary ok">送りました。ありがとうございます！</div><div class="hint">${esc(r.path)}</div>`
+    : `<div class="warn">${esc(r.fallback_reason)}</div>`
+      + '<div>このPC内に保存しました。お手数ですが、下のファイルをチャンネルに添付してください。</div>'
+      + `<code class="rp-path">${esc(r.path)}</code>`;
+  $('rpSend').classList.add('hidden');
+  $('rpCancel').textContent = '閉じる';
 });
 
 // init
