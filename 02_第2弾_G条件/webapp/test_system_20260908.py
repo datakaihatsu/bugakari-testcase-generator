@@ -282,5 +282,80 @@ class Test出力Excelの2枚目シート(unittest.TestCase):
             shutil.rmtree(tmp, ignore_errors=True)
 
 
+_UKEIRE = os.path.join(_TEIREI, '受け入れテスト後', '【試行中】テストケースツール')
+
+
+@unittest.skipIf(not (os.path.exists(_HASAI) and os.path.isdir(_UKEIRE)),
+                 'GaiaCloud データまたは受入テストの実ファイルが無い環境')
+class Test受入テストNG_無筋なのに鉄筋側が通る(unittest.TestCase):
+    """2026-09-11 受入テスト（静的破砕工 32-16123）のNG:
+      ① ③のTCに「無筋」しかない（鉄筋コンクリートの行が0本）
+      ② 無筋の行なのに鉄筋側の条件・観点に値が入っている
+    原因: 親条件「無筋・鉄筋区分」が step2 計画に無く後付け定数になり、
+          その後付けより前に(注)ゲートを当てていたため注6・7が読み飛ばされていた。
+    03（新規想定タブ）は元から正しく、その姿に揃うことを確認する。"""
+
+    _TEKKIN = ('2次破砕の方法(鉄筋コンクリート)',
+               '鉄筋コンクリートの破砕(ハンマドリル)2次ハンドブレーカー',
+               '鉄筋コンクリートの破砕(ハンマドリル)2次大型機械',
+               '鉄筋コンクリートの破砕(クローラドリル)2次大型機械')
+
+    @classmethod
+    def setUpClass(cls):
+        cls.tmp = tempfile.mkdtemp()
+        g20 = glob.glob(os.path.join(_UKEIRE, '00_*商品_Gaia入力基準表_静的破砕工*.xlsx'))
+        g30 = [p for p in glob.glob(os.path.join(_UKEIRE, '01_#63169*.xlsx'))
+               if '※' not in os.path.basename(p)]
+        assert g20 and g30, '受入テストの 00/01 ファイルが見つからない'
+        r = service.gen_tc(g20[0], g30[0], _HASAI, cfg=_cfg(cls.tmp))
+        assert r['error'] is None, r['error']
+        cls.tc = _matrix(r['csv_path'])
+        cls.log = r['log']
+        h = cls.tc[0]
+        cls.i_src = h.index('無筋・鉄筋区分')
+        cls.i_kanten = h.index('選択肢の適切さ確認')
+        cls.i_tekkin = [h.index(n) for n in cls._TEKKIN if n in h]
+        cls.rows = [r for r in cls.tc[1:] if r and r[0].startswith('TC')]
+
+    @classmethod
+    def tearDownClass(cls):
+        shutil.rmtree(cls.tmp, ignore_errors=True)
+
+    def test_親条件が軸として追加される(self):
+        self.assertIn('【vary軸追加(G条件ゲートの親条件)】', self.log)
+        self.assertIn('無筋・鉄筋区分', self.log)
+
+    def test_鉄筋コンクリートの行が出る(self):
+        n = sum(1 for r in self.rows if '鉄筋' in r[self.i_src])
+        self.assertGreater(n, 0, '鉄筋コンクリートのTCが1本も無い')
+
+    def test_無筋の行に鉄筋側の値が残らない(self):
+        self.assertEqual(len(self.i_tekkin), 4, 'TCに鉄筋側4列が揃っていない')
+        for r in self.rows:
+            if '無筋' not in r[self.i_src]:
+                continue
+            vals = [r[i] for i in self.i_tekkin]
+            self.assertTrue(all(v in ('', '-') for v in vals),
+                            f'{r[0]}: 無筋なのに鉄筋側に値 {vals}')
+
+    def test_無筋の行の観点文に鉄筋側が出ない(self):
+        for r in self.rows:
+            if '無筋' not in r[self.i_src]:
+                continue
+            for ln in r[self.i_kanten].split('\n'):
+                if '無筋・鉄筋区分' in ln:
+                    continue
+                self.assertNotIn('鉄筋', ln, f'{r[0]}: 無筋の行の観点に鉄筋側 → {ln}')
+
+    def test_鉄筋の行では鉄筋側が1列だけ開く(self):
+        """注11〜13: 2次破砕の方法(鉄筋)の選択で、下位3列のうち1列だけが開く。"""
+        for r in self.rows:
+            if '鉄筋' not in r[self.i_src]:
+                continue
+            sub = [r[i] for i in self.i_tekkin[1:]]
+            opened = [v for v in sub if v not in ('', '-')]
+            self.assertEqual(len(opened), 1, f'{r[0]}: 鉄筋側の下位列が {sub}')
+
+
 if __name__ == '__main__':
     unittest.main(verbosity=2)

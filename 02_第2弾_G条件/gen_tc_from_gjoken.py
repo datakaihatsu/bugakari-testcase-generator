@@ -881,6 +881,70 @@ def promote_gate_axes(plan_csv, gate_names):
     return changed
 
 
+def add_missing_gate_axes(plan_csv, g20, g30, diffs, g_list, eligible_src):
+    """新規列を開閉する親条件が step2 計画に無ければ vary 軸として追加する
+    (2026-09-11 受入テストNG 静的破砕工: 無筋・鉄筋区分)。
+
+    promote_gate_axes は「計画にある軸の昇格」しかできない。親が改定前JSONの
+    既定探索で見つからず計画に無いと、後段 reconcile_columns_with_g30 が末尾に
+    定数(先頭選択肢)で貼るだけになり、
+      (a) 親の非既定側(鉄筋コンクリート)のTCが1本も出ない
+      (b) 新規列側だけが振られ、親と食い違う行ができる
+    が起きていた。親を軸に足せば step3 が親の各選択肢で行を作り、(注)ゲートで
+    子列が正しく開閉する。
+
+    eligible_src: B-7(#27)の「全選択肢が対象列を閉じるゲートは昇格しない」を通過した
+      源泉列(30側index)の集合。run() の昇格判定と同じ基準を使う。
+    質問Noは改定前JSONの解析結果(g_list: 列名→質問No群)から、20側の列名で引く。
+    戻り値: 追加した軸のラベル一覧。"""
+    rows = _read_csv_any(plan_csv)
+    if not rows:
+        return []
+    header = rows[0]
+    present = set()
+    for r in rows[1:]:
+        if len(r) > 4:
+            present.add(r[1].strip())
+            present.add(re.sub(r'\(固定\)$', '', r[4]).strip())
+    inv = {i30: i20 for i20, i30 in diffs.get('col_map', {}).items()}
+    sits_by_name = {}
+    for gl in g_list:
+        sits_by_name.setdefault(gl['name'], []).extend(int(s) for s in gl['sits'])
+    ax_no = max([int(r[0].split('-')[1]) for r in rows[1:]
+                 if r and re.match(r'^AX-\d+$', r[0])] or [0])
+    added = []
+    for sg in sorted(eligible_src):
+        if not (0 <= sg < len(g30['cols'])):
+            continue
+        nm30 = g30['cols'][sg]['name']
+        if nm30 in present:
+            continue
+        i20 = inv.get(sg)
+        if i20 is None or not (0 <= i20 < len(g20['cols'])):
+            continue                      # 親自身が新規列 → 改定前JSONに質問が無い
+        nm20 = g20['cols'][i20]['name']
+        if nm20 in present:
+            continue
+        sits = sits_by_name.get(nm20) or []
+        if not sits:
+            continue
+        for s in sits:
+            ax_no += 1
+            row = [''] * len(header)
+            row[0] = 'AX-%03d' % ax_no
+            row[1] = nm20
+            row[2] = 'vary'
+            row[3] = str(s)
+            row[4] = nm20
+            row[5] = f'業務ルール(G条件ゲート・親条件追加): {nm30}の切替が新規条件を開閉'
+            row[6] = 'SitsumonKind=19'
+            rows.append(row)
+        added.append(nm20)
+    if added:
+        BugakariJSON.write_csv(rows, plan_csv)
+    return added
+
+
 # ------------------------------------------------------------------
 # 後処理: 新規追加列の挿入・展開・◯仮置き
 # ------------------------------------------------------------------
@@ -1448,6 +1512,9 @@ def reconcile_columns_with_g30(rows, g30):
         raws = c.get('opts_raw') or c.get('opts') or []
         default = '任意' if c.get('numeric') else (raws[0] if raws else '任意')
         header.append(nm)
+        # 受入テストNG(2026-09-11 静的破砕工): 同じループで足した列を源泉とする注も
+        # gated_for_row で見えるように、列位置表を追加のたびに更新する。
+        name2i.setdefault(nm, len(header) - 1)
         for r in rows[1:]:
             while len(r) < len(header) - 1:
                 r.append('')
@@ -1915,16 +1982,23 @@ def run(csv20, csv30, old_json, out_dir=None, src20=None, src30=None):
         for t in tgts:
             e['closed'].setdefault(t, set()).add(nt['src_choice'])
     gate_names = set()
+    eligible_src = set()
     for src_g, e in by_src.items():
         opts = set(g30['cols'][src_g]['opts']) if 0 <= src_g < len(g30['cols']) else set()
         if not opts or any(opts - ch for ch in e['closed'].values()):
             gate_names |= e['names']
+            eligible_src.add(src_g)
         else:
             print(f"【vary昇格スキップ(全選択肢が対象列を閉じる)】{sorted(e['names'])}")
     if gate_names:
         changed = promote_gate_axes(s2, gate_names)
         if changed:
             print(f"【vary昇格(業務ルール/G条件ゲート)】{changed}")
+        # 親が計画に無い(改定前JSONの既定探索で見つからない)場合は軸を足す
+        # (2026-09-11 受入テストNG 静的破砕工: 無筋・鉄筋区分)
+        added_axes = add_missing_gate_axes(s2, g20, g30, diffs, analysis[2], eligible_src)
+        if added_axes:
+            print(f"【vary軸追加(G条件ゲートの親条件)】{added_axes}")
 
     run_step3(s2, pseudo, s3, old_json)
 
@@ -1944,9 +2018,12 @@ def run(csv20, csv30, old_json, out_dir=None, src20=None, src30=None):
     out = fix_kanten_wording(out)
     out = apply_g30_codes(out, g30)
     out = add_gate_branch_rows(out, g20, g30)
-    out = apply_g30_gating(out, g30)
     out = drop_deleted_condition_columns(out, g20, g30, diffs)
     out = reconcile_columns_with_g30(out, g30)
+    # (注)ゲートは列補完の後に当てる (2026-09-11 受入テストNG 静的破砕工):
+    #   前に当てると、reconcile が後付けする列を源泉とする注が「源泉列なし」で
+    #   黙って読み飛ばされ、無筋の行に鉄筋側の値が残っていた。
+    out = apply_g30_gating(out, g30)
     out = drop_unused_condition_columns(out)
     out = reorder_by_g30(out, g30)
     out = drop_placeholder_kanten(out)
