@@ -19,6 +19,7 @@ http.server ベース。127.0.0.1 バインドの単一ユーザ用ローカル�
   POST /api/gen_tc           {g30_b64,g30_name, use_session_g20|g20_b64} → TC生成（テストケース_xlsx）
   GET  /api/settings         現在の格納場所・出所（既定/ユーザ設定）・実在チェック
   POST /api/settings         {action: derive|check|save|reset} 格納場所の変更（画面の「変更」）
+  POST /api/dan_mode         {on} ①G条件の出力形式（段あり/段なし）を保存（ユーザ設定・ツール更新でも残る）
   GET  /api/report_info?tab= 「問題・要望を送る」ダイアログ用（送信者・送る内容・弾かれた注）
                              tab=latest はタブを問わず直近の実行（ヘッダーのボタン用）
   POST /api/report           {tab, kind, comment, notes} 直近の実行を報告パック(zip)にして報告箱へ保存
@@ -80,7 +81,11 @@ def _remember_run(tab, r, inputs=(), json_path='', koshu=''):
         koshu = koshu.replace('テストケース_', '').replace('商品_', '')
     run = {'tab': tab, 'files': files, 'note_lint': r.get('note_lint') or [],
            'log': r.get('log') or '', 'error': r.get('error') or '',
-           'koshu': koshu, 'tc_count': r.get('tc_count')}
+           'koshu': koshu, 'tc_count': r.get('tc_count'),
+           # 段表記: そのときの①のモードと、段の出力/読み取りの結果（受けた側の再現用）
+           'gjoken_dan_mode': 'on' if service.get_dan_mode() else 'off',
+           'dan': ([r['dan_message']] if r.get('dan_message') else [])
+                  + list(r.get('dan_read') or [])}
     run.update(report.json_fingerprint(json_path))
     _LAST_RUN[tab] = run
     _LAST_RUN['latest'] = run
@@ -163,7 +168,8 @@ class Handler(BaseHTTPRequestHandler):
                 'version_label': version.VERSION_LABEL,
                 'expcd_path': CFG['expcd_path'],
                 'bugakari_root': CFG['bugakari_root'],
-                'is_custom': bool(service.load_user_settings()),
+                'is_custom': service.has_custom_paths(),
+                'gjoken_dan_mode': service.get_dan_mode(),
                 'session': {'has_handoff': bool(_SESSION['g20_csv'] and _SESSION['old_json']),
                             'koshu': _SESSION['koshu']},
             })
@@ -191,6 +197,8 @@ class Handler(BaseHTTPRequestHandler):
                 self._api_gen_tc_new()
             elif route == '/api/settings':
                 self._api_settings()
+            elif route == '/api/dan_mode':
+                self._api_dan_mode()
             elif route == '/api/report':
                 self._api_report()
             else:
@@ -263,6 +271,16 @@ class Handler(BaseHTTPRequestHandler):
         st.update({'error': None, 'saved': True, 'message': msg})
         self._send_json(st)
 
+    def _api_dan_mode(self):
+        """①G条件の出力形式（段あり/段なし）を保存する。画面で切り替えた時点で呼ぶ。"""
+        body = self._read_json()
+        try:
+            service.set_dan_mode(bool(body.get('on')))
+        except OSError as e:
+            self._send_json({'error': '設定の保存に失敗しました: %s' % e})
+            return
+        self._send_json({'error': None, 'gjoken_dan_mode': service.get_dan_mode()})
+
     def _api_report(self):
         body = self._read_json()
         tab = body.get('tab') or 'general'
@@ -283,13 +301,16 @@ class Handler(BaseHTTPRequestHandler):
     def _api_gen_g(self):
         body = self._read_json()
         json_path = body.get('json_path') or ''
-        r = service.gen_g(json_path, CFG)
+        # dan: 画面のモード（指定が無ければユーザ設定のモード）
+        dan = bool(body['dan']) if 'dan' in body else None
+        r = service.gen_g(json_path, CFG, dan=dan)
         _remember_run('g', r, json_path=json_path)
         if r['error']:
             self._send_json(r)
             return
         # ③引継ぎ用にセッション保存 + DLトークン発行
-        _SESSION['g20_csv'] = r['csv_path']
+        # 段ありで出したときは xlsx を引き継ぐ（③が分岐点の太字を読めるように）
+        _SESSION['g20_csv'] = r['xlsx_path'] if r.get('dan') else r['csv_path']
         _SESSION['old_json'] = json_path
         _SESSION['koshu'] = r.get('workdir') and os.path.basename(
             r['xlsx_path']).replace('商品_', '').replace('.xlsx', '')
@@ -372,7 +393,7 @@ def main(open_browser=True):
     print('Gaia歩掛TCツール', version.VERSION_LABEL, '起動:', url, ' (Ctrl+Cで終了)')
     print('  ExpCD    :', CFG['expcd_path'])
     print('  Bugakari :', CFG['bugakari_root'])
-    if service.load_user_settings():
+    if service.has_custom_paths():
         # 既定と違う場所を見ている端末は、問い合わせ時にここを見れば一発で分かる
         print('  ※ 格納場所は画面の設定で変更されています:', service.user_settings_path())
     # ソケットは make_server の時点で bind+listen 済み → ここで開けば接続拒否にならない

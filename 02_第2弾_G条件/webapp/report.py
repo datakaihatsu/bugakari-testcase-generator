@@ -161,6 +161,8 @@ def save_report(run, kind, comment, notes, cfg, now=None):
         'json_size': run.get('json_size'),
         'error': run.get('error') or '',
         'tc_count': run.get('tc_count'),
+        'gjoken_dan_mode': run.get('gjoken_dan_mode') or '',   # ①の出力形式（段あり=on）
+        'dan': list(run.get('dan') or []),                       # 段の出力/読み取りの結果
         'files': [arc for arc, _ in pack_files(run)],
     }
     out = {'error': None, 'path': None, 'shared': False, 'fallback_reason': None}

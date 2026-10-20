@@ -80,6 +80,8 @@ class _Walker:
         res = FlowWalker(self.bj, vary_selections=dict(sel)).walk()
         v = _Visited(list(res.get('visited_sitsumons', [])))
         v.src = dict(res.get('row_sources', {}))
+        # 段表記（gjoken_dan）用: 質問ごとに実際に選ばれた行。列・注の判定には使わない
+        v.ss = dict(res.get('sit_selections', {}))
         self._cache[key] = v
         return v
 
@@ -285,4 +287,5 @@ def analyze_reach(bj, json_path):
 
     out_cols = [{'name': c['name'], 'sits': sorted(c['sits']), 'kind': c['kind']}
                 for c in col_list]
-    return {'cols': out_cols, 'notes': notes, 'walks': walker.n}
+    # walk_list: 段表記（gjoken_dan）が分岐点ごとの到達列を引くための歩行一覧
+    return {'cols': out_cols, 'notes': notes, 'walks': walker.n, 'walk_list': walks}

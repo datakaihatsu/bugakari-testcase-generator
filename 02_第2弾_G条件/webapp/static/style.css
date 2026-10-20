@@ -65,6 +65,7 @@ button.secondary { background: var(--border); color: var(--fg); }
 fieldset { border: 1px solid var(--border); border-radius: 6px; margin: 14px 0; padding: 10px 14px; }
 legend { font-weight: 600; padding: 0 6px; }
 .radio { display: inline-block; margin: 4px 16px 4px 0; font-weight: 400; }
+.danmode p.hint { display: block; margin: 4px 0 0; }
 
 .result { margin-top: 12px; }
 .result .summary { font-weight: 600; }

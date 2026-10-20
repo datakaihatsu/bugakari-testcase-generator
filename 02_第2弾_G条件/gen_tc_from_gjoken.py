@@ -1833,17 +1833,24 @@ def _print_note_lint(g30):
         print(f"  [{ln['level']}] {ln['text']}")
 
 
-def run_single(csv30, out_dir=None, koshu=None):
-    """改修後G条件(表)1枚から改定後TC叩き台CSVを生成する(新規歩掛モード)。"""
+def run_single(csv30, out_dir=None, koshu=None, src30=None):
+    """改修後G条件(表)1枚から改定後TC叩き台CSVを生成する(新規歩掛モード)。
+    src30: 元のファイル(xlsx)。段付きG条件の分岐点(太字)を読むため（gjoken_dan_read）。"""
     if out_dir is None:
         out_dir = os.path.join(os.getcwd(), 'out_tc')
     os.makedirs(out_dir, exist_ok=True)
+    koshu = koshu or _koshu_from_gname(src30 or csv30)
+    # 段付きG条件は自動判別して1枚の表に戻す（段が無ければ何もしない）
+    import gjoken_dan_read
+    csv30, dan30 = gjoken_dan_read.prepare(csv30, out_dir, '30', src30)
     g30 = read_gjoken(csv30)
     _print_note_lint(g30)
     out = build_tc_from_single_gjoken(g30)
-    koshu = koshu or _koshu_from_gname(csv30)
     s3 = os.path.join(out_dir, f'step3.0_テストケース_{koshu}.csv')
     BugakariJSON.write_csv(out, s3)
+    if dan30:
+        gjoken_dan_read.fix_tc(dan30, s3)
+        out = _read_csv_any(s3)
     n = len(out) - 1
     print(f'新規歩掛TC叩き台 生成完了: {s3}  (TC {n}件 / 列 {len(out[0])})')
     return s3
@@ -1853,7 +1860,8 @@ def run_single(csv30, out_dir=None, koshu=None):
 # main
 # ------------------------------------------------------------------
 
-def run(csv20, csv30, old_json, out_dir=None):
+def run(csv20, csv30, old_json, out_dir=None, src20=None, src30=None):
+    """src20/src30: 元のファイル(xlsx)。段付きG条件の分岐点(太字)を読むため（gjoken_dan_read）。"""
     if out_dir is None:
         p30 = os.path.dirname(os.path.abspath(csv30))
         if os.path.basename(p30).startswith('30_'):
@@ -1862,6 +1870,10 @@ def run(csv20, csv30, old_json, out_dir=None):
             out_dir = os.path.join(os.getcwd(), 'out_tc')
     os.makedirs(out_dir, exist_ok=True)
 
+    # 段付きG条件は自動判別して1枚の表に戻す（段が無ければ何もしない＝従来と同じ経路）
+    import gjoken_dan_read
+    csv20, _dan20 = gjoken_dan_read.prepare(csv20, out_dir, '20', src20)
+    csv30, dan30 = gjoken_dan_read.prepare(csv30, out_dir, '30', src30)
     g20 = read_gjoken(csv20)
     g30 = read_gjoken(csv30)
     _print_note_lint(g30)
@@ -1939,6 +1951,9 @@ def run(csv20, csv30, old_json, out_dir=None):
     out = reorder_by_g30(out, g30)
     out = drop_placeholder_kanten(out)
     BugakariJSON.write_csv(out, s3)
+    if dan30:
+        gjoken_dan_read.fix_tc(dan30, s3, csv20)
+        out = _read_csv_any(s3)
     n = len(out) - 1
     print(f'③改定後TC叩き台 生成完了: {s3}  (TC {n}件 / 列 {len(out[0])})')
     return s3

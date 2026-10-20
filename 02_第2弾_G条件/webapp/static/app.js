@@ -33,6 +33,16 @@ function noteLintBlock(r) {
   }).join('');
   return `<div class="notelint ${worst}"><div class="notelint-h">(注)の解釈</div><ul>${items}</ul></div>`;
 }
+// 段表記: ①は出力の結果（dan_message）、③・新規歩掛は入力を段ありとして読んだか（dan_read）
+function danBlock(r) {
+  const lines = [].concat(r.dan_message ? [r.dan_message] : [], r.dan_read || []);
+  if (!lines.length) return '';
+  return `<div class="hint">${lines.map(esc).join('<br>')}</div>`;
+}
+function danModeOn() {
+  const el = document.querySelector('input[name=danmode]:checked');
+  return !!el && el.value === 'on';
+}
 function logBlock(r) {
   if (!r.log) return '';
   return `<details class="log"><summary>実行ログ</summary><pre>${esc(r.log)}</pre></details>`;
@@ -66,6 +76,8 @@ async function loadConfig() {
   try {
     const c = await (await fetch('/api/config')).json();
     $('appver').textContent = c.version_label || '';
+    const dm = document.querySelector(`input[name=danmode][value=${c.gjoken_dan_mode ? 'on' : 'off'}]`);
+    if (dm) dm.checked = true;
     $('cfgbar').innerHTML = (c.is_custom ? '<span class="custombadge">変更中</span> ' : '')
       + esc(`ExpCD: ${c.expcd_path}　|　歩掛: ${c.bugakari_root}`);
     updateHandoff(c.session);
@@ -135,17 +147,29 @@ $('btnGenG').addEventListener('click', async () => {
   if (!selectedJsonPath) { box.innerHTML = '<span class="err">版を選択してください</span>'; return; }
   box.innerHTML = '生成中…';
   $('btnGenG').disabled = true;
-  const r = await postJSON('/api/gen_g', { json_path: selectedJsonPath });
+  const r = await postJSON('/api/gen_g', { json_path: selectedJsonPath, dan: danModeOn() });
   $('btnGenG').disabled = false;
   if (r.error) { box.innerHTML = `<span class="err">${esc(r.error)}</span>${reportBtn('g')}${logBlock(r)}`; return; }
   const verLabel = r.apply_ymd ? `適用 ${r.apply_ymd} 版・` : '';
   box.innerHTML = `<div class="summary ok">G条件を生成しました（${verLabel}条件 ${r.g_count} 個 / 注 ${r.note_count} 件）</div>`
+    + danBlock(r)
     + dlLink(r)
     + '<div class="hint">この「商品」xlsxをExcelで改修後の内容に編集し、③の枠Bに投入してください。</div>'
     + reportBtn('g')
     + logBlock(r);
   refreshHandoff();
 });
+
+// ---- ① G条件の出力形式（段あり/段なし）: 切り替えた時点で保存する ----
+document.querySelectorAll('input[name=danmode]').forEach((el) => el.addEventListener('change', async () => {
+  const msg = $('danModeMsg');
+  try {
+    const r = await postJSON('/api/dan_mode', { on: danModeOn() });
+    msg.textContent = r.error ? r.error : '（記憶しました）';
+  } catch (e) {
+    msg.textContent = '（記憶できませんでした。今回の生成には反映されます）';
+  }
+}));
 
 // ---- ③ g20 mode ----
 function syncG20Mode() {
@@ -177,6 +201,7 @@ $('btnGenTC').addEventListener('click', async () => {
   $('btnGenTC').disabled = false;
   if (r.error) { box.innerHTML = `<span class="err">${esc(r.error)}</span>${noteLintBlock(r)}${reportBtn('tc')}${logBlock(r)}`; return; }
   box.innerHTML = `<div class="summary ok">テストケースを生成しました（TC ${r.tc_count} 件 / 列 ${r.col_count}）</div>`
+    + danBlock(r)
     + noteLintBlock(r)
     + dlLink(r)
     + '<div class="hint">条件（積算で選ぶ）列の見出しは色付き。生成後は必ず人が目視レビューしてください。</div>'
@@ -197,6 +222,7 @@ $('btnGenTCNew').addEventListener('click', async () => {
   $('btnGenTCNew').disabled = false;
   if (r.error) { box.innerHTML = `<span class="err">${esc(r.error)}</span>${noteLintBlock(r)}${reportBtn('tcnew')}${logBlock(r)}`; return; }
   box.innerHTML = `<div class="summary ok">テストケースを生成しました（TC ${r.tc_count} 件 / 列 ${r.col_count}）</div>`
+    + danBlock(r)
     + noteLintBlock(r)
     + dlLink(r)
     + '<div class="hint">条件列の見出しは色付き。2件目以降のパターンは、直前の行と変わった選択肢セルが色付きです。生成後は必ず人が目視レビューしてください。</div>'

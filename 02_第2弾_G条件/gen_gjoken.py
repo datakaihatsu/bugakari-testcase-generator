@@ -396,6 +396,16 @@ def analyze(json_path):
       （02 大型ブレーカが組合せ上限超で①ごと失敗するため。確定設計B B-3(4)）。
       規格名計上の判定 `_has_kikaku_keijo` は JSON しか見ないので生成不要。
     """
+    bj, gen, g_list, notes, _reach = _analyze_full(json_path)
+    for g in g_list:
+        g.pop('_rid_label', None)
+    return bj, gen, g_list, notes
+
+
+def _analyze_full(json_path):
+    """analyze の本体。g_list に '_rid_label'（選択肢row_id→表示ラベル）を残し、
+    到達走査の結果 reach も返す（段表記 gjoken_dan が使う）。
+    戻り: (bj, gen, g_list, notes, reach)"""
     bj = BugakariJSON(json_path)
 
     # 規格名計上○の判定に ColumnTCGenerator を使う（generate() は呼ばない）
@@ -470,9 +480,16 @@ def analyze(json_path):
                        'label2mk': label2mk, 'numeric': numeric, 'kikaku': kikaku,
                        '_rid_label': rid_of})
 
+    notes = _format_notes(g_list, reach['notes'])
+    return bj, gen, g_list, notes, reach
+
+
+def _format_notes(g_list, raw_notes):
+    """到達走査の注 [(x列, x選択肢row_id, y列)] → 注の文（①の書式）。
+    g_list は '_rid_label' を持っていること（_analyze_full の戻り）。"""
     # --- 注: (x列, x選択肢row_id, y列) を「同一x・同一対象集合」で1行にまとめる ---
     by_choice = {}
-    for xi, rid, yi in reach['notes']:
+    for xi, rid, yi in raw_notes:
         by_choice.setdefault((xi, rid), []).append(yi)
     grouped = {}
     for (xi, rid), ys in by_choice.items():
@@ -502,14 +519,33 @@ def analyze(json_path):
                 sel = '・'.join(_mk(p) for p in poss) + 'のいずれかを選択した場合は'
         tgt = '、'.join(f'G{yi + 1}条件' for yi in ys)
         notes.append(f'G{xi + 1}条件で{sel}、{tgt}を入力する必要はない。')
-
-    for g in g_list:
-        g.pop('_rid_label', None)
-    return bj, gen, g_list, notes
+    return notes
 
 
 def build_g(json_path, out_dir=None, label=None):
-    bj, gen, g_list, notes = analyze(json_path)
+    """G条件CSVを出力しパスを返す（段なし＝従来の形式）。"""
+    return build_g_ex(json_path, out_dir, label)['csv']
+
+
+def build_g_ex(json_path, out_dir=None, label=None, dan=False):
+    """G条件CSVを出力する。dan=True で段表記を試みる（段の対象外なら段なしと同じ出力）。
+
+    戻り: {'csv': パス,
+           'dan': None | {'branch_col': 分岐点のCSV列index(0始まり・A列=0),
+                          'segments': [(CSV行index, 行数), ...], 'header_rows': 3,
+                          'ncols': 表の列数, 'count': 段数, 'branch_name': 分岐点の条件名},
+           'dan_reason': 段ありを指定したのに段にしなかった理由（段なし指定時は ''）}
+    """
+    bj, gen, g_list, notes, reach = _analyze_full(json_path)
+    dan_info, dan_reason = None, ''
+    if dan:
+        import gjoken_dan
+        dan_info, dan_reason = gjoken_dan.build_dan(bj, g_list, reach)
+        if dan_info:
+            # 分岐点を発生源とする注は段の「－」で表したので消す
+            notes = _format_notes(g_list, dan_info['raw_notes'])
+    for g in g_list:
+        g.pop('_rid_label', None)
 
     # --- CSV 出力 ---
     name, unit = _header(bj)
@@ -518,16 +554,25 @@ def build_g(json_path, out_dir=None, label=None):
     # 規格名計上行は G番号の直下(2行目)に置き、条件名→選択肢の並びを隣接させる。
     out.append(['規格名計上'] + ['○' if g.get('kikaku') else '' for g in g_list])
     out.append(['各種(条件名)'] + [g['name'] for g in g_list])
-    maxopt = max((len(g['opt_labels']) for g in g_list), default=0)
-    for oi in range(maxopt):
-        row = ['']
-        for g in g_list:
-            if oi < len(g['opt_labels']):
-                cell = g.get('opt_raws', g['opt_labels'])[oi]  # 表示はコード併記(元のまま)
-                row.append(cell if g.get('numeric') else f'{_mk(oi)}{cell}')
-            else:
-                row.append('')
-        out.append(row)
+    dan_meta = None
+    if dan_info:
+        rows, segments = gjoken_dan.render_rows(g_list, dan_info, _mk)
+        dan_meta = {'branch_col': dan_info['xi'] + 1, 'header_rows': len(out),
+                    'segments': [(len(out) + o, h) for o, h in segments],
+                    'ncols': len(g_list) + 1, 'count': len(dan_info['dans']),
+                    'branch_name': g_list[dan_info['xi']]['name']}
+        out.extend(rows)
+    else:
+        maxopt = max((len(g['opt_labels']) for g in g_list), default=0)
+        for oi in range(maxopt):
+            row = ['']
+            for g in g_list:
+                if oi < len(g['opt_labels']):
+                    cell = g.get('opt_raws', g['opt_labels'])[oi]  # 表示はコード併記(元のまま)
+                    row.append(cell if g.get('numeric') else f'{_mk(oi)}{cell}')
+                else:
+                    row.append('')
+            out.append(row)
     out.append([])
     out.append(['(注)'])
     for i, nn in enumerate(notes, 1):
@@ -554,11 +599,16 @@ def build_g(json_path, out_dir=None, label=None):
         print(f'  G{i}: {g["name"]}  選択肢={g["opt_labels"]}')
     for nn in notes:
         print('  注:', nn)
-    return out_csv
+    if dan_meta:
+        print(f'  段表記: 分岐点=「{dan_meta["branch_name"]}」 段数={dan_meta["count"]}')
+    elif dan:
+        print(f'  段表記: 対象外（{dan_reason}）→ 段なしの形式で出力')
+    return {'csv': out_csv, 'dan': dan_meta, 'dan_reason': dan_reason}
 
 
 if __name__ == '__main__':
     if len(sys.argv) < 2:
-        print('Usage: python3 gen_gjoken.py <JSON> [出力ディレクトリ]')
+        print('Usage: python3 gen_gjoken.py <JSON> [出力ディレクトリ] [--dan]')
         sys.exit(1)
-    build_g(sys.argv[1], sys.argv[2] if len(sys.argv) > 2 else None)
+    _args = [a for a in sys.argv[1:] if a != '--dan']
+    build_g_ex(_args[0], _args[1] if len(_args) > 1 else None, dan='--dan' in sys.argv)

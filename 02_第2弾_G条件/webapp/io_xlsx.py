@@ -22,7 +22,7 @@ import os
 import unicodedata
 
 import openpyxl
-from openpyxl.styles import Alignment, Font, PatternFill
+from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 
 CSV_ENCODINGS = ('cp932', 'utf-8-sig', 'utf-8')
 WRITE_ENCODING = 'cp932'          # エンジンと同一（Excelで開くため必須）
@@ -39,6 +39,9 @@ CHANGED_CELL_FILL = 'FFF2CC'
 # TC末尾の観点/期待列（この手前までが条件列）。先頭2列=テストID/テスト区分はメタ。
 _TC_TRAILING_EXACT = ('選択肢の適切さ確認', '規格名計上')
 _TC_TRAILING_PREFIX = ('代価表行と数量', '期待:')
+# 段付きG条件（段ありモード）の書式。依頼者確認用①（2026-10-01）に合わせる。
+DAN_HEADER_FILL = 'F0F2F5'        # 見出し3行（G番号・規格名計上・条件名）
+DAN_LABEL_FILL = 'EAF2F8'         # A列の段見出し（段の行数ぶん）
 
 
 # ----------------------------------------------------------------------------
@@ -216,6 +219,44 @@ def matrix_to_xlsx(matrix, xlsx_path, sheet_title='Sheet1',
                 _c.alignment = Alignment(wrap_text=True, vertical='top')
 
     os.makedirs(os.path.dirname(os.path.abspath(xlsx_path)), exist_ok=True)
+    wb.save(xlsx_path)
+    return xlsx_path
+
+
+def format_dan_sheet(xlsx_path, meta):
+    """段付きG条件（段ありモード）の表に罫線・塗り・太字を付ける（1枚目のシート）。
+    meta = gen_gjoken.build_g_ex の戻り 'dan'。
+      見出し3行: 薄灰の塗り・細線、条件名の行の下は中太線。
+      段: 切れ目と表の下端は中太線、段の中の行どうしは極細線、
+          A列の段見出しは段の行数ぶん薄青で塗り段名は太字、分岐点の選択肢は太字。"""
+    if not meta:
+        return xlsx_path
+    wb = openpyxl.load_workbook(xlsx_path)
+    ws = wb.worksheets[0]
+    thin, med, hair = Side(style='thin'), Side(style='medium'), Side(style='hair')
+    ncols, hrows = meta['ncols'], meta['header_rows']
+    hfill = PatternFill('solid', fgColor=DAN_HEADER_FILL)
+    lfill = PatternFill('solid', fgColor=DAN_LABEL_FILL)
+    for r in range(1, hrows + 1):
+        for c in range(1, ncols + 1):
+            cell = ws.cell(row=r, column=c)
+            cell.fill = hfill
+            cell.border = Border(left=thin, right=thin, top=thin,
+                                 bottom=med if r == hrows else thin)
+    for start, h in meta['segments']:
+        for k in range(h):
+            r = start + k + 1                       # 0始まり行index → 1始まり
+            top = med if k == 0 else hair
+            bottom = med if k == h - 1 else hair
+            for c in range(1, ncols + 1):
+                cell = ws.cell(row=r, column=c)
+                cell.border = Border(left=thin, right=thin, top=top, bottom=bottom)
+                if c == 1:
+                    cell.fill = lfill
+                    if cell.value:
+                        cell.font = Font(bold=True)
+                elif c == meta['branch_col'] + 1 and cell.value:
+                    cell.font = Font(bold=True)
     wb.save(xlsx_path)
     return xlsx_path
 

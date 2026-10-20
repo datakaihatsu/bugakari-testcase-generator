@@ -73,6 +73,15 @@
         <button id="btnLocate">検索</button>
       </div>
       <div id="locateResult" class="result"></div>
+      <!-- G条件の出力形式（段表記・2026-10-20）。選んだモードはこのPCに記憶する -->
+      <fieldset class="danmode">
+        <legend>G条件の出力形式</legend>
+        <label class="radio"><input type="radio" name="danmode" value="off" checked> 段なし（従来どおり(注)で表す）</label>
+        <label class="radio"><input type="radio" name="danmode" value="on"> 段あり（大きな分岐を段に分けて表す）</label>
+        <span id="danModeMsg" class="hint"></span>
+        <p class="hint">選んだ形式はこのPCに記憶されます。段の対象にならない工種は、段ありでも従来の形式で出力します。
+          ③・新規歩掛は、入力のG条件に段があるかを自動で判別します（切替は不要です）。</p>
+      </fieldset>
       <div class="row">
         <button id="btnGenG" disabled>G条件を生成（商品）</button>
       </div>

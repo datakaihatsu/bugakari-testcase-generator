@@ -36,6 +36,7 @@ import locate
 import io_xlsx
 import gen_gjoken
 import gen_tc_from_gjoken
+import gjoken_dan_read  # ③の段付きG条件の自動判別（画面表示用）
 import generate_csv  # CombinationExplosionError(上限超=生成不可)の表示整形用
 
 _ENGINE = os.path.join(_PARENT, 'engine')
@@ -81,7 +82,10 @@ def load_config(path=None, use_user_settings=True):
 #   保存先は **配布フォルダの外**（%LOCALAPPDATA%）。差分リビルドで app/ を丸ごと
 #   上書きしてもユーザの設定が消えないようにするため（config.json に書かない）。
 # ----------------------------------------------------------------------------
-USER_SETTING_KEYS = ('expcd_path', 'bugakari_root')
+PATH_SETTING_KEYS = ('expcd_path', 'bugakari_root')
+# gjoken_dan_mode: ①G条件の出力形式（'on'=段あり / 'off'=段なし・既定）。2026-10-20 段表記
+DAN_MODE_KEY = 'gjoken_dan_mode'
+USER_SETTING_KEYS = PATH_SETTING_KEYS + (DAN_MODE_KEY,)
 _APP_DIRNAME = 'GaiaKoshuTC'
 
 
@@ -114,23 +118,53 @@ def load_user_settings():
     return out
 
 
-def save_user_settings(values):
-    """ユーザ設定を保存する。既知キーのみ書き込む。失敗時は OSError。"""
+def _write_user_settings(data):
     path = user_settings_path()
+    if not data:
+        if os.path.exists(path):
+            os.remove(path)
+        return path
     os.makedirs(os.path.dirname(path), exist_ok=True)
-    data = {k: str(values[k]).strip() for k in USER_SETTING_KEYS
-            if values.get(k) and str(values[k]).strip()}
     with open(path, 'w', encoding='utf-8') as f:
         json.dump(data, f, ensure_ascii=False, indent=2)
     return path
 
 
+def save_user_settings(values):
+    """ユーザ設定を保存する。既知キーのみ・**既存の設定に重ねて**書く（格納場所を保存しても
+    段表記のモードが消えないように）。値が空のキーは消す。失敗時は OSError。"""
+    data = load_user_settings()
+    for k in USER_SETTING_KEYS:
+        if k not in values:
+            continue
+        v = str(values[k] or '').strip()
+        if v:
+            data[k] = v
+        else:
+            data.pop(k, None)
+    return _write_user_settings(data)
+
+
 def clear_user_settings():
-    """ユーザ設定を削除し、配布既定（config.json）へ戻す。"""
-    path = user_settings_path()
-    if os.path.exists(path):
-        os.remove(path)
-    return path
+    """格納場所の設定を消し、配布既定（config.json）へ戻す。段表記のモードは残す。"""
+    data = {k: v for k, v in load_user_settings().items() if k not in PATH_SETTING_KEYS}
+    return _write_user_settings(data)
+
+
+def has_custom_paths(user=None):
+    """格納場所を画面で変更しているか（段表記のモードだけの保存は「変更中」に数えない）。"""
+    user = load_user_settings() if user is None else user
+    return any(k in user for k in PATH_SETTING_KEYS)
+
+
+def get_dan_mode():
+    """①G条件の出力形式。True=段あり。既定は段なし（False）。"""
+    return load_user_settings().get(DAN_MODE_KEY) == 'on'
+
+
+def set_dan_mode(on):
+    """①G条件の出力形式を保存する（ツール更新でも残る）。失敗時は OSError。"""
+    return save_user_settings({DAN_MODE_KEY: 'on' if on else 'off'})
 
 
 def normalize_setting_paths(expcd_path, bugakari_root):
@@ -217,7 +251,7 @@ def settings_state(cfg=None):
         'bugakari_root': cfg['bugakari_root'],
         'defaults': {'expcd_path': defaults['expcd_path'],
                      'bugakari_root': defaults['bugakari_root']},
-        'is_custom': bool(user),
+        'is_custom': has_custom_paths(user),
         'settings_file': user_settings_path(),
         'check': check_paths(cfg['expcd_path'], cfg['bugakari_root']),
     }
@@ -287,6 +321,25 @@ def _note_lint(csv30):
         return []
 
 
+def _dan_view(csv20, csv30, src20, src30, wd):
+    """段付きG条件の自動判別（画面表示用）。戻り: (注の解釈に使う30の表, 表示メッセージ list)。
+    段の読み取りエラーは ③本体（run）が同じ判定で利用者向けエラーにするので、ここでは握る。"""
+    msgs, flat30 = [], csv30
+    view = os.path.join(wd, '_段の判別')
+    for label, c, src in (('商品G条件', csv20, src20), ('改修後G条件', csv30, src30)):
+        if not c:
+            continue
+        try:
+            (flat, P), _log = _capture(gjoken_dan_read.prepare, c, view, label, src)
+        except Exception:  # noqa: BLE001
+            continue
+        if P is not None and label == '改修後G条件':
+            flat30 = flat
+        if gjoken_dan_read.summary(P):
+            msgs.append('%s: %s' % (label, gjoken_dan_read.summary(P)))
+    return flat30, msgs
+
+
 def _note_count(matrix):
     nb = io_xlsx._note_boundary(matrix)
     if nb >= len(matrix):
@@ -313,12 +366,17 @@ def locate_versions(input_text, cfg=None):
 # ----------------------------------------------------------------------------
 # ① G条件生成
 # ----------------------------------------------------------------------------
-def gen_g(json_path, cfg=None, out_dir=None):
+def gen_g(json_path, cfg=None, out_dir=None, dan=None):
     """①タブ: 歩掛JSON → G条件CSV＋「商品_」xlsx。
-    戻り値: {error, csv_path, xlsx_path, log, g_count, note_count, workdir}"""
+    dan: True=段あり / False=段なし / None=ユーザ設定のモード（既定は段なし）。
+    戻り値: {error, csv_path, xlsx_path, log, g_count, note_count, workdir,
+             dan_mode, dan(段にしたときの情報 or None), dan_message}"""
     cfg = cfg or load_config()
+    if dan is None:
+        dan = get_dan_mode()
     out = {'error': None, 'csv_path': None, 'xlsx_path': None, 'log': '',
-           'g_count': None, 'note_count': None, 'workdir': None}
+           'g_count': None, 'note_count': None, 'workdir': None,
+           'dan_mode': bool(dan), 'dan': None, 'dan_message': ''}
     if not os.path.exists(json_path):
         out['error'] = 'JSONが見つかりません: %s' % json_path
         return out
@@ -327,9 +385,17 @@ def gen_g(json_path, cfg=None, out_dir=None):
         wd = out_dir or new_workdir(cfg, 'geng_')
         out['workdir'] = wd
         # label='' → 素の名前「Gaia入力基準表_<工種>(<単位>).csv」
-        csv_path, log = _capture(gen_gjoken.build_g, json_path, wd, '')
+        res, log = _capture(gen_gjoken.build_g_ex, json_path, wd, '', dan=bool(dan))
+        csv_path = res['csv']
         out['csv_path'] = csv_path
         out['log'] = log
+        if res['dan']:
+            out['dan'] = {k: res['dan'][k] for k in ('count', 'branch_name')}
+            out['dan_message'] = '段ありで出力しました（分岐点=「%s」／%d段）' % (
+                res['dan']['branch_name'], res['dan']['count'])
+        elif dan:
+            out['dan_message'] = ('この工種は段の対象外のため、段なしの形式で出力しました（%s）'
+                                  % res['dan_reason'])
         base = os.path.splitext(os.path.basename(csv_path))[0]
         # 版によって出力が変わるため、適用日をファイル名に付ける（同名衝突・混同を防ぐ）
         ymd = _apply_ymd(json_path)
@@ -337,6 +403,7 @@ def gen_g(json_path, cfg=None, out_dir=None):
         suffix = '_適用%s' % ymd if ymd else ''
         xlsx = os.path.join(wd, '商品_%s%s.xlsx' % (base, suffix))  # 運用者向け名称=商品
         io_xlsx.csv_to_xlsx(csv_path, xlsx)
+        io_xlsx.format_dan_sheet(xlsx, res['dan'])   # 段ありのときだけ罫線・塗り・太字
         out['xlsx_path'] = xlsx
         matrix, _ = io_xlsx.read_csv_matrix(csv_path)
         if matrix:
@@ -359,7 +426,8 @@ def gen_tc(g20, g30, old_json, cfg=None, out_dir=None):
     戻り値: {error, csv_path, xlsx_path, log, tc_count, col_count, workdir}"""
     cfg = cfg or load_config()
     out = {'error': None, 'csv_path': None, 'xlsx_path': None, 'log': '',
-           'tc_count': None, 'col_count': None, 'workdir': None, 'note_lint': []}
+           'tc_count': None, 'col_count': None, 'workdir': None, 'note_lint': [],
+           'dan_read': []}
     for label, p in (('商品G条件', g20), ('改修後G条件', g30), ('改定前JSON', old_json)):
         if not p or not os.path.exists(p):
             out['error'] = '%s が見つかりません: %s' % (label, p)
@@ -370,15 +438,18 @@ def gen_tc(g20, g30, old_json, cfg=None, out_dir=None):
         out['workdir'] = wd
         csv20 = _to_csv(g20, wd, '20_G条件.csv')
         csv30 = _to_csv(g30, wd, '30_G条件.csv')
-        out['note_lint'] = _note_lint(csv30)
-        s3, log = _capture(gen_tc_from_gjoken.run, csv20, csv30, old_json, wd)
+        # 段付きG条件は③が自動判別する（①のモードに依存しない）。注の解釈表示は段を戻した表で
+        flat30, out['dan_read'] = _dan_view(csv20, csv30, g20, g30, wd)
+        out['note_lint'] = _note_lint(flat30)
+        s3, log = _capture(gen_tc_from_gjoken.run, csv20, csv30, old_json, wd,
+                           src20=g20, src30=g30)
         out['csv_path'] = s3
         out['log'] = log
         koshu = os.path.splitext(os.path.basename(s3))[0]
         koshu = koshu.replace('step3.0_テストケース_', '').replace('step3.0_テストケース', '')
         xlsx = os.path.join(wd, 'テストケース_%s.xlsx' % (koshu or '出力'))
         io_xlsx.csv_to_xlsx(s3, xlsx,  # 条件列見出しを自動色付け
-                            extra_sheets=[('(注)の解釈', _note_sheet(csv30))])
+                            extra_sheets=[('(注)の解釈', _note_sheet(flat30))])
         out['xlsx_path'] = xlsx
         matrix, _ = io_xlsx.read_csv_matrix(s3)
         if matrix:
@@ -401,7 +472,8 @@ def gen_tc_new(g30, cfg=None, out_dir=None):
     戻り値: {error, csv_path, xlsx_path, log, tc_count, col_count, workdir}"""
     cfg = cfg or load_config()
     out = {'error': None, 'csv_path': None, 'xlsx_path': None, 'log': '',
-           'tc_count': None, 'col_count': None, 'workdir': None, 'note_lint': []}
+           'tc_count': None, 'col_count': None, 'workdir': None, 'note_lint': [],
+           'dan_read': []}
     if not g30 or not os.path.exists(g30):
         out['error'] = '改修後G条件が見つかりません: %s' % g30
         return out
@@ -412,13 +484,14 @@ def gen_tc_new(g30, cfg=None, out_dir=None):
         # 工種名は元ファイル名から拾う（_to_csv でリネームされる前に）
         koshu = gen_tc_from_gjoken._koshu_from_gname(g30)
         csv30 = _to_csv(g30, wd, '30_G条件.csv')
-        out['note_lint'] = _note_lint(csv30)
-        s3, log = _capture(gen_tc_from_gjoken.run_single, csv30, wd, koshu)
+        flat30, out['dan_read'] = _dan_view(None, csv30, None, g30, wd)
+        out['note_lint'] = _note_lint(flat30)
+        s3, log = _capture(gen_tc_from_gjoken.run_single, csv30, wd, koshu, src30=g30)
         out['csv_path'] = s3
         out['log'] = log
         xlsx = os.path.join(wd, 'テストケース_%s.xlsx' % (koshu or '出力'))
         io_xlsx.csv_to_xlsx(s3, xlsx,  # 条件列見出し＋変更セルを自動色付け
-                            extra_sheets=[('(注)の解釈', _note_sheet(csv30))])
+                            extra_sheets=[('(注)の解釈', _note_sheet(flat30))])
         out['xlsx_path'] = xlsx
         matrix, _ = io_xlsx.read_csv_matrix(s3)
         if matrix:
