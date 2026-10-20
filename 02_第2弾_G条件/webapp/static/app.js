@@ -295,6 +295,22 @@ $('btnSetReset').addEventListener('click', async () => {
 // 2026-10-20 FB: 弾かれた注などを、再現データ付きで開発者へ簡単に渡せるようにする。
 // 送る中身はサーバが直近の実行から組み立てる（ここからはタブ名しか送らない）。
 let reportTab = 'general';
+let reportInfo = null;   // 開いたときの /api/report_info（添付チェックの切替で再描画に使う）
+
+function renderReportData(attach) {
+  const info = reportInfo;
+  const withData = attach && info.has_run;
+  $('rpTarget').textContent = withData
+    ? `対象: ${info.tab_label}${info.koshu ? '　' + info.koshu : ''}${info.has_error ? '（エラーあり）' : ''}`
+    : '実行データは添付しません（要望・問題の文章だけを送ります）';
+  const files = withData ? info.files : ['meta.json'];
+  $('rpFiles').innerHTML = files.map((f) => `<li>${esc(f)}</li>`).join('');
+  const notes = withData ? info.notes : [];
+  $('rpNotes').innerHTML = notes.map((n, i) =>
+    `<label class="rp-note"><input type="checkbox" value="${i}"> <span>${esc(n)}</span></label>`).join('');
+  $('rpNotes').dataset.notes = JSON.stringify(notes);
+  $('rpNotesBox').classList.toggle('hidden', !notes.length);
+}
 
 async function openReport(tab) {
   reportTab = tab || 'general';
@@ -305,16 +321,15 @@ async function openReport(tab) {
   $('rpCancel').textContent = 'キャンセル';
   document.querySelector('input[name=rpKind][value="問題"]').checked = true;
   const info = await (await fetch('/api/report_info?tab=' + encodeURIComponent(reportTab))).json();
+  reportInfo = info;
   $('rpUser').textContent = info.user;
   $('rpDir').textContent = info.report_dir;
-  $('rpTarget').textContent = info.tab === 'general'
-    ? '実行データは添付しません（要望・問題の文章だけを送ります）'
-    : `対象: ${info.tab_label}${info.koshu ? '　' + info.koshu : ''}${info.has_error ? '（エラーあり）' : ''}`;
-  $('rpFiles').innerHTML = info.files.map((f) => `<li>${esc(f)}</li>`).join('');
-  $('rpNotes').innerHTML = info.notes.map((n, i) =>
-    `<label class="rp-note"><input type="checkbox" value="${i}"> <span>${esc(n)}</span></label>`).join('');
-  $('rpNotes').dataset.notes = JSON.stringify(info.notes);
-  $('rpNotesBox').classList.toggle('hidden', !info.notes.length);
+  // ヘッダーのボタン: 直近の実行があれば添付（初期値オン・外せる）。結果欄のボタンは常に添付
+  const fromHeader = reportTab === 'latest';
+  $('rpAttach').checked = true;
+  $('rpAttachRow').classList.toggle('hidden', !(fromHeader && info.has_run));
+  $('rpAttachLabel').textContent = `直近の実行データを添付する（${info.tab_label}${info.koshu ? '　' + info.koshu : ''}）`;
+  renderReportData(true);
   if (!info.reachable) {
     $('rpResult').innerHTML = '<div class="warn">共有ドライブが見つかりません。保存するとこのPC内に置かれるので、そのファイルをチャンネルに添付してください。</div>';
   }
@@ -326,6 +341,7 @@ document.addEventListener('click', (e) => {
   const b = e.target.closest('.reportbtn');
   if (b) openReport(b.dataset.tab);
 });
+$('rpAttach').addEventListener('change', () => renderReportData($('rpAttach').checked));
 $('rpCancel').addEventListener('click', () => $('reportDlg').close());
 $('rpSend').addEventListener('click', async () => {
   const all = JSON.parse($('rpNotes').dataset.notes || '[]');
@@ -333,7 +349,8 @@ $('rpSend').addEventListener('click', async () => {
   const kind = document.querySelector('input[name=rpKind]:checked').value;
   $('rpSend').disabled = true;
   $('rpResult').innerHTML = '保存中…';
-  const r = await postJSON('/api/report', { tab: reportTab, kind, notes, comment: $('rpComment').value });
+  const tab = $('rpAttach').checked && reportInfo && reportInfo.has_run ? reportTab : 'general';
+  const r = await postJSON('/api/report', { tab, kind, notes, comment: $('rpComment').value });
   if (r.error) {
     $('rpResult').innerHTML = `<span class="err">${esc(r.error)}</span>`;
     $('rpSend').disabled = false;

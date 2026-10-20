@@ -19,6 +19,7 @@ import os
 import re
 import json
 import getpass
+import hashlib
 import zipfile
 import datetime
 
@@ -32,7 +33,26 @@ _APP_DIRNAME = 'GaiaKoshuTC'
 KINDS = ('問題', '要望', 'その他')
 TAB_LABELS = {'g': '①G条件生成', 'tc': '③テストケース生成（改定）',
               'tcnew': '新規歩掛', 'general': '（実行データなし）'}
-META_SCHEMA = 1
+META_SCHEMA = 2   # 2: json_sha256 / json_size を追加
+
+
+def json_fingerprint(path):
+    """歩掛JSONの名前と指紋。中身は送らず、再現側で「同じファイルか」を突き合わせるために使う
+    （利用者のGaiaCloudが古い・同名で中身が差し替わった、を見分ける）。"""
+    out = {'json_name': '', 'json_sha256': '', 'json_size': None}
+    if not path:
+        return out
+    out['json_name'] = os.path.basename(path)
+    try:
+        h = hashlib.sha256()
+        with open(path, 'rb') as f:
+            for chunk in iter(lambda: f.read(1 << 20), b''):
+                h.update(chunk)
+        out['json_sha256'] = h.hexdigest()
+        out['json_size'] = os.path.getsize(path)
+    except OSError:
+        pass  # 指紋は付加情報。取れなくても報告は止めない
+    return out
 
 
 def report_dir(cfg):
@@ -86,6 +106,7 @@ def preview(run, cfg):
         'tab': run.get('tab') or 'general',
         'tab_label': TAB_LABELS.get(run.get('tab') or 'general'),
         'koshu': run.get('koshu') or '',
+        'has_run': bool(run.get('tab')) and run.get('tab') != 'general',
         'has_error': bool(run.get('error')),
         'files': [arc for arc, _ in pack_files(run)]
                  + (['注の解釈.json'] if run.get('note_lint') else [])
@@ -135,7 +156,9 @@ def save_report(run, kind, comment, notes, cfg, now=None):
         'tab': run.get('tab') or 'general',
         'tab_label': TAB_LABELS.get(run.get('tab') or 'general'),
         'koshu': koshu,
-        'json_name': run.get('json_name') or '',   # JSON本体は同梱しない（名前だけ）
+        'json_name': run.get('json_name') or '',   # JSON本体は同梱しない（名前と指紋だけ）
+        'json_sha256': run.get('json_sha256') or '',
+        'json_size': run.get('json_size'),
         'error': run.get('error') or '',
         'tc_count': run.get('tc_count'),
         'files': [arc for arc, _ in pack_files(run)],

@@ -20,6 +20,7 @@ http.server ベース。127.0.0.1 バインドの単一ユーザ用ローカル�
   GET  /api/settings         現在の格納場所・出所（既定/ユーザ設定）・実在チェック
   POST /api/settings         {action: derive|check|save|reset} 格納場所の変更（画面の「変更」）
   GET  /api/report_info?tab= 「問題・要望を送る」ダイアログ用（送信者・送る内容・弾かれた注）
+                             tab=latest はタブを問わず直近の実行（ヘッダーのボタン用）
   POST /api/report           {tab, kind, comment, notes} 直近の実行を報告パック(zip)にして報告箱へ保存
 
 設計書: 運用化設計書_2026-07-07.md §9。
@@ -51,6 +52,7 @@ _DOWNLOADS = {}
 _SESSION = {'g20_csv': None, 'old_json': None, 'koshu': None}
 # 「問題・要望を送る」用に、タブごとの直近の実行を覚えておく（tab → run）。
 # クライアントからはパスを受け取らず、ここに記録したものだけを zip に入れる。
+# 'latest' はタブを問わず直近の実行（ヘッダーのボタンから送るときに添付する）。
 _LAST_RUN = {}
 
 _CT_XLSX = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
@@ -67,17 +69,21 @@ def _reload_cfg():
     return CFG
 
 
-def _remember_run(tab, r, inputs=(), json_name='', koshu=''):
-    """報告パック用に実行内容を記録する。inputs = [(zip内の名前, 実パス)]。"""
+def _remember_run(tab, r, inputs=(), json_path='', koshu=''):
+    """報告パック用に実行内容を記録する。inputs = [(zip内の名前, 実パス)]。
+    歩掛JSONは同梱しないので、名前と指紋（sha256・サイズ）だけ残す。"""
     files = list(inputs)
     if r.get('xlsx_path'):
         files.append(('出力/' + os.path.basename(r['xlsx_path']), r['xlsx_path']))
     if not koshu and r.get('xlsx_path'):
         koshu = os.path.splitext(os.path.basename(r['xlsx_path']))[0]
         koshu = koshu.replace('テストケース_', '').replace('商品_', '')
-    _LAST_RUN[tab] = {'tab': tab, 'files': files, 'note_lint': r.get('note_lint') or [],
-                      'log': r.get('log') or '', 'error': r.get('error') or '',
-                      'json_name': json_name, 'koshu': koshu, 'tc_count': r.get('tc_count')}
+    run = {'tab': tab, 'files': files, 'note_lint': r.get('note_lint') or [],
+           'log': r.get('log') or '', 'error': r.get('error') or '',
+           'koshu': koshu, 'tc_count': r.get('tc_count')}
+    run.update(report.json_fingerprint(json_path))
+    _LAST_RUN[tab] = run
+    _LAST_RUN['latest'] = run
 
 
 def _register_download(path):
@@ -278,7 +284,7 @@ class Handler(BaseHTTPRequestHandler):
         body = self._read_json()
         json_path = body.get('json_path') or ''
         r = service.gen_g(json_path, CFG)
-        _remember_run('g', r, json_name=os.path.basename(json_path))
+        _remember_run('g', r, json_path=json_path)
         if r['error']:
             self._send_json(r)
             return
@@ -329,7 +335,7 @@ class Handler(BaseHTTPRequestHandler):
         r = service.gen_tc(g20, g30, old_json, CFG)
         _remember_run('tc', r, inputs=[('入力/枠A_' + os.path.basename(g20), g20),
                                        ('入力/枠B_' + os.path.basename(g30), g30)],
-                      json_name=os.path.basename(old_json),
+                      json_path=old_json,
                       koshu=_SESSION.get('koshu') if body.get('use_session_g20') else '')
         if not r['error']:
             r['download_token'] = _register_download(r['xlsx_path'])

@@ -11,7 +11,7 @@
     <div class="titlerow">
       <h1>Gaia歩掛 G条件・テストケース生成ツール</h1>
       <span class="titleright">
-        <button type="button" class="reportbtn" data-tab="general" title="実行データなしで要望・問題を送ります">📮 問題・要望を送る</button>
+        <button type="button" class="reportbtn" data-tab="latest" title="直近の実行データを添えて（外すこともできます）要望・問題を送ります">📮 問題・要望を送る</button>
         <span id="appver" class="appver" title="ツールのバージョン（お問い合わせ時はこの表記をお知らせください）"></span>
       </span>
     </div>
@@ -131,6 +131,8 @@
     <form method="dialog" id="reportForm">
       <h2>📮 問題・要望を送る</h2>
       <div id="rpTarget" class="hint rp-target"></div>
+      <label id="rpAttachRow" class="rp-note hidden"><input type="checkbox" id="rpAttach" checked>
+        <span id="rpAttachLabel"></span></label>
 
       <label>種類</label>
       <div>
@@ -146,13 +148,13 @@
 
       <label for="rpComment">一言 <span class="hint">空欄でも送れます</span></label>
       <textarea id="rpComment" rows="4"
-        placeholder="例: 「G3=②に固定」の意味で書きました／この列も出てほしい／見た目をこうしてほしい"></textarea>
+        placeholder="本当はどうなってほしかったかを書いてもらえると、そのまま対応に移れます&#10;例: 「G3=②に固定」の意味で書きました／この列も出てほしい／見た目をこうしてほしい"></textarea>
 
       <div class="rp-meta">送信者: <strong id="rpUser"></strong> <span class="hint">（Windowsのログイン名）</span></div>
       <details class="rp-files">
         <summary>送られる内容</summary>
         <ul id="rpFiles"></ul>
-        <div class="hint">※ 歩掛JSONは送りません（ファイル名だけ記録します）</div>
+        <div class="hint">※ 歩掛JSONは送りません（ファイル名と指紋だけ記録し、こちらの手元のJSONと同じか照合します）</div>
         <div class="hint">保存先: <code id="rpDir"></code></div>
       </details>
 

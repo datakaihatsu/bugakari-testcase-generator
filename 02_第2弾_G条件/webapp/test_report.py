@@ -163,13 +163,33 @@ class TestReportHTTP(_EnvMixin, unittest.TestCase):
         self.assertFalse(any(n.endswith('.json') and n not in ('meta.json', '注の解釈.json')
                              for n in names))  # 歩掛JSONは入らない
         self.assertEqual(meta['json_name'], os.path.basename(OLD_JSON))
+        # JSON本体の代わりに指紋（sha256・サイズ）で「同じファイルか」を突き合わせられる
+        self.assertEqual(meta['json_sha256'], report.json_fingerprint(OLD_JSON)['json_sha256'])
+        self.assertEqual(meta['json_size'], os.path.getsize(OLD_JSON))
         self.assertGreater(meta['tc_count'], 0)
+
+        # ヘッダーのボタン(latest)は、タブを問わず直近の実行（=この③）を添付候補にする
+        latest = _req(self.base + '/api/report_info?tab=latest')
+        self.assertTrue(latest['has_run'])
+        self.assertEqual(latest['tab'], 'tc')
+        res = _req(self.base + '/api/report', {'tab': 'latest', 'kind': '要望', 'comment': ''})
+        with zipfile.ZipFile(res['path']) as z:
+            self.assertIn('入力/枠B_30.csv', z.namelist())
 
     def test_header_report_without_run(self):
         info = _req(self.base + '/api/report_info?tab=general')
         self.assertEqual(info['files'], ['meta.json'])
+        self.assertFalse(info['has_run'])
         res = _req(self.base + '/api/report', {'tab': 'general', 'kind': '要望', 'comment': 'x'})
         self.assertTrue(res['shared'])
+
+
+class TestFingerprint(unittest.TestCase):
+    def test_missing_or_empty_path(self):
+        self.assertEqual(report.json_fingerprint('')['json_name'], '')
+        fp = report.json_fingerprint('X:/存在しない.json')
+        self.assertEqual(fp['json_name'], '存在しない.json')
+        self.assertEqual(fp['json_sha256'], '')
 
 
 if __name__ == '__main__':
