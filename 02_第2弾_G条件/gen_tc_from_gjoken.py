@@ -335,6 +335,102 @@ def _resolve_choices(sel_part, col, issues, where):
     return out
 
 
+# --- 「かつ」「固定される」「外的要因により」の(注)（2026-10-22 高松 大型土のう工） ---
+#   既存の1条件・入力不要の形で読めなかった注にだけ試す（既存の注の解釈は変えない）。
+#     G1条件で①を選択した場合 かつ G4条件が①の場合は、G12条件は①で固定される。   … 条件付き固定
+#     G1条件で①を選択した場合 かつ G4条件が①の場合は、G6条件を入力する必要はない。 … 条件付き閉じる
+#     外的要因により G3=② に固定される                                            … 外的要因(09-18設計)
+#   「または」は扱わない（注を2本に分ければ同じ意味になる）。
+_EXT_NOTE = re.compile(r'^外的要因により\s*G(\d+)\s*[=＝]\s*(.+?)\s*(?:に|で)固定され(?:る|ます)')
+_FIX_TAIL = re.compile(r'G(\d+)(?:条件)?(「[^」]*」)?\s*(?:は|が)\s*(.+?)\s*(?:で|に)固定され(?:る|ます)')
+_COND_HEAD = re.compile(r'G(\d+)条件(「[^」]*」)?\s*(?:で|が)\s*(.+)$')
+NOTE_FORMS_HINT = ('使える形は「G2条件で②を選択した場合は、G3条件を入力する必要はない。」'
+                   '「G1条件で①を選択した場合 かつ G4条件が①の場合は、G12条件は①で固定される。」'
+                   '「外的要因により G3=② に固定される」の3つです')
+EXT_MARK = '(外的要因)'
+
+
+def _strip_note_no(raw):
+    """注の先頭の通し番号（7. / 7．/ 7、）を外す。"""
+    return re.sub(r'^\s*\d+\s*[\.．、)）]\s*', '', raw).strip()
+
+
+def _parse_rule_note(raw, cols, gnums, issues, where):
+    """「かつ」「固定される」「外的要因により」の注を読む。
+    戻り値: rule dict / 注の形でなければ None（呼び出し側が従来どおり ERROR にする）
+      rule = {'kind': 'fix'|'close'|'ext', 'conds': [(列index, 選択肢キー)],
+              'targets': [列index], 'fix': 選択肢キー or None, 'fix_raw': 表示用, 'raw': 原文}"""
+    body = _strip_note_no(raw)
+
+    def one_choice(g, sel, w):
+        ch = _resolve_choices(sel, cols[g], issues, w)
+        if len(ch) != 1 or ch[0][0] is None or ch[0][0] < 0:
+            shown = ch[0][1] if ch else sel
+            issues.append({'level': 'ERROR', 'text': (
+                f'{w}: 選択肢「{shown}」が条件「{cols[g]["name"]}」の選択肢に'
+                f'1つに特定できません(候補: {" / ".join(cols[g]["opts"])})。この注は無視されます。')})
+            return None
+        return ch[0][0]
+
+    m = _EXT_NOTE.match(body)
+    if m:
+        t = _resolve_ref_g(int(m.group(1)), '', cols, gnums, issues, f'{where}(対象側)')
+        if t is None:
+            return None
+        k = one_choice(t, m.group(2), where)
+        if k is None:
+            return None
+        return {'kind': 'ext', 'conds': [], 'targets': [t], 'fix': cols[t]['opts'][k],
+                'fix_raw': cols[t]['opts_raw'][k], 'fix_idx': k, 'raw': raw}
+
+    mh = re.search(r'場合(?:は|には)?[、，,\s]*', body)
+    if not mh or 'G' not in body[:mh.start()]:
+        return None
+    # 条件部は最後の「場合は」まで（「かつ」の各条件にも「場合」が付くため）
+    last = None
+    for x in re.finditer(r'場合(?:は|には)[、，,\s]*', body):
+        last = x
+    if last is None:
+        return None
+    cond_part, res_part = body[:last.start()], body[last.end():]
+    pieces = [p.strip() for p in re.split(r'[\s　、]*かつ[\s　、]*', cond_part) if p.strip()]
+    conds = []
+    for p in pieces:
+        p = re.sub(r'(?:を選択した|が選択された|の)?(?:場合)?$', '', p).strip()
+        mc = _COND_HEAD.match(p)
+        if not mc:
+            return None
+        g = _resolve_ref_g(int(mc.group(1)), (mc.group(2) or '')[1:-1], cols, gnums,
+                           issues, f'{where}(条件側)')
+        if g is None:
+            return None
+        sel = re.sub(r'(?:のいずれか)?(?:を選択した|が選択された)?$', '', mc.group(3)).strip()
+        k = one_choice(g, sel, where)
+        if k is None:
+            return None
+        conds.append((g, cols[g]['opts'][k]))
+    if not conds:
+        return None
+    mf = _FIX_TAIL.search(res_part)
+    if mf:
+        t = _resolve_ref_g(int(mf.group(1)), (mf.group(2) or '')[1:-1], cols, gnums,
+                           issues, f'{where}(対象側)')
+        if t is None:
+            return None
+        k = one_choice(t, mf.group(3), where)
+        if k is None:
+            return None
+        return {'kind': 'fix', 'conds': conds, 'targets': [t], 'fix': cols[t]['opts'][k],
+                'fix_raw': cols[t]['opts_raw'][k], 'fix_idx': k, 'raw': raw}
+    mt = re.search(_NOTE_TAIL, res_part)
+    if mt and len(conds) >= 2:
+        targets = _parse_targets(res_part[:mt.start()], cols, gnums, issues, f'{where}(対象側)')
+        if targets:
+            return {'kind': 'close', 'conds': conds, 'targets': targets, 'fix': None,
+                    'fix_raw': None, 'raw': raw}
+    return None
+
+
 def read_gjoken(path):
     """G条件CSV → {'cols': [{name, opts, numeric, kikaku}], 'notes': [...]}"""
     rows = _read_csv_any(path)
@@ -402,6 +498,7 @@ def read_gjoken(path):
     #     ①「A」・②「B」のいずれかを選択した場合は… / ①「A」～③「C」のいずれかを選択した場合は…
     #   → 選択肢ごとに1エントリへ展開して返す(下流ロジックは従来どおり単一選択肢前提)。
     notes = []
+    rules = []   # かつ／固定／外的要因 の注（_parse_rule_note）
     issues = []
     parsed = 0
     lint_lines = []
@@ -409,14 +506,32 @@ def read_gjoken(path):
         gnums = list(range(1, len(cols) + 1))
     for ni, raw in enumerate(notes_raw, 1):
         where = f'注{ni}'
-        sp = _split_note(raw)
+        # 「かつ」で条件をつなぐ注は既存の文型だと「場合は、」の直前までを選択肢と誤読する
+        #   （G1条件で③を選択した場合 かつ G3条件で②… → G1の③と②）ので、先に新しい読み方へ回す
+        sp = None if re.search(r'場合[\s　、]*かつ', raw) else _split_note(raw)
         if sp is None:
-            if _NOTE_LIKE.search(raw):
+            n_iss = len(issues)
+            rule = _parse_rule_note(raw, cols, gnums, issues, where)
+            if rule is not None:
+                rules.append(rule)
+                parsed += 1
+                kind_txt = {'fix': '固定', 'close': '入力不要', 'ext': '外的要因'}[rule['kind']]
+                src_txt = ' かつ '.join(f'G{gnums[g]} {cols[g]["name"]}' for g, _ in rule['conds'])
+                sel_txt = ' かつ '.join(ch for _, ch in rule['conds'])
+                tgt_txt = '・'.join(f'G{gnums[t]}「{cols[t]["name"]}」' for t in rule['targets'])
+                if rule['fix'] is not None:
+                    tgt_txt += f' → {_mk_disp(rule["fix_idx"])}{rule["fix"]} に固定'
+                lint_lines.append({'no': where, 'status': '反映', 'kind': kind_txt,
+                                   'src': src_txt or '(外から決まる)', 'sel': sel_txt,
+                                   'tgt': tgt_txt, 'raw': raw})
+                continue
+            if len(issues) > n_iss:
+                continue   # 注の形だが参照・選択肢が解決できなかった（個別のERRORを出し済み）
+            if _NOTE_LIKE.search(raw) or raw.lstrip().startswith('外的要因'):
                 issues.append({
                     'level': 'ERROR',
                     'text': (f'{where}: 文の形が想定外でテストケースに反映できません'
-                             f'(この注は無視されます)。「G2条件で②を選択した場合は、'
-                             f'G3条件を入力する必要はない。」の形に直してください。'
+                             f'(この注は無視されます)。{NOTE_FORMS_HINT}。'
                              f' → {raw}')})
             continue
         src_num, src_name_in, sel_part, tgt_part = sp
@@ -461,7 +576,21 @@ def read_gjoken(path):
             lint_lines.append({'no': f'注{ni}', 'status': '未反映', 'src': '',
                                'sel': '', 'tgt': '', 'raw': raw})
     lint_lines.sort(key=lambda x: int(x['no'][1:]))
-    return {'cols': cols, 'gnums': gnums, 'notes': notes,
+    # 固定と入力不要が同じ対象に同じ条件で当たる注は矛盾（どちらをTCに書くか決まらない）
+    for r in rules:
+        if r['kind'] != 'fix':
+            continue
+        for nt in notes:
+            if (r['targets'][0] in nt['targets']
+                    and any(g == nt['src_g'] and ch == nt['src_choice'] for g, ch in r['conds'])):
+                issues.append({'level': 'ERROR', 'text': (
+                    f'「{cols[nt["src_g"]]["name"]}」が「{nt["src_choice"]}」のとき、'
+                    f'「{cols[r["targets"][0]]["name"]}」は入力不要の注と固定の注の両方に当たります。'
+                    f'入力不要（-）を優先します。 → {r["raw"]}')})
+    ext_cols = [i for i, c in enumerate(cols)
+                if EXT_MARK in c['name'] or '（外的要因）' in c['name']]
+    return {'cols': cols, 'gnums': gnums, 'notes': notes, 'rules': rules,
+            'ext_cols': ext_cols,
             'note_issues': issues, 'note_lines': lint_lines,
             'note_raw_count': len(notes_raw), 'note_parsed_count': parsed}
 
@@ -473,18 +602,20 @@ def note_sheet_rows(g, label='改修後G条件'):
     無くなる（A-3の割り切り）。このシートが唯一の確認手段なので、注ごとに
     「番号を名前へ展開した解釈」を出す。
     """
-    rows = [['注', '判定', '条件', '選択肢', '入力不要になる条件', '原文']]
+    # 種別（入力不要／固定／外的要因）は既存6列の後ろに足す（2026-10-22）
+    rows = [['注', '判定', '条件', '選択肢', '入力不要になる条件', '原文', '種別']]
     for ln in (g.get('note_lines') or []):
+        kind = ln.get('kind') or ('入力不要' if ln.get('status') == '反映' else '')
         rows.append([ln.get('no', ''), ln.get('status', ''), ln.get('src', ''),
-                     ln.get('sel', ''), ln.get('tgt', ''), ln.get('raw', '')])
+                     ln.get('sel', ''), ln.get('tgt', ''), ln.get('raw', ''), kind])
     issues = g.get('note_issues') or []
     if issues:
         rows.append([])
-        rows.append(['指摘', '', '', '', '', ''])
+        rows.append(['指摘', '', '', '', '', '', ''])
         for it in issues:
-            rows.append(['', it.get('level', ''), it.get('text', ''), '', '', ''])
+            rows.append(['', it.get('level', ''), it.get('text', ''), '', '', '', ''])
     if len(rows) == 1:
-        rows.append(['', '(注) はありません', '', '', '', ''])
+        rows.append(['', '(注) はありません', '', '', '', '', ''])
     return rows
 
 
@@ -1557,7 +1688,8 @@ def apply_g30_gating(rows, g30):
             si = hidx(cols[sg].get('name', ''))
             if si is None or si >= len(row):
                 continue
-            if _norm(row[si]) != nt.get('src_choice'):
+            # 「②(固定)」（条件付き固定・外的要因）のセルも源泉として効かせる
+            if re.sub(r'\(固定\)$', '', _norm(row[si])) != nt.get('src_choice'):
                 continue
             for tg in nt.get('targets', []):
                 if not (0 <= tg < len(cols)):
@@ -1566,6 +1698,230 @@ def apply_g30_gating(rows, g30):
                 if ti is not None and ti < len(row):
                     row[ti] = '-'
     return rows
+
+
+EXT_KUBUN_LABEL = '外的要因'   # テスト区分（09-18設計: 外から値が送られた状態を作るテスト）
+
+
+def apply_rule_notes(rows, g30):
+    """「かつ」「固定される」「外的要因により」の注と (外的要因) 列をTCへ反映する
+    （2026-10-22 高松 大型土のう工／09-18 設計A）。該当する注・列が無ければ何もしない
+    （＝既存の工種の出力は変わらない）。apply_g30_gating の後に呼ぶ。
+
+    - 条件付き固定: 条件がすべて成り立つ行で対象列を「<値>(固定)」にし、観点を添える。
+      その行が対象列の別の値を試していた行なら、条件列を固定が効かない選択肢へずらして
+      「固定されない側では選べること」の網羅を残す。条件が成り立つ行が無ければ1行足す。
+    - 条件付き入力不要: 条件がすべて成り立つ行で対象列を「-」。
+    - 外的要因による固定: 土台行を複製し、対象列を「<値>(固定)」にした行を区分「外的要因」で足す。
+    - (外的要因) 列: 通常の行では「-」（全国版では聞かれない）。選択肢ごとに区分「外的要因」の行を足す。
+    """
+    rules = g30.get('rules') or []
+    ext_cols = g30.get('ext_cols') or []
+    if not rows or (not rules and not ext_cols):
+        return rows
+    cols = g30.get('cols', [])
+    header = rows[0]
+    data = [r for r in rows[1:] if r and str(r[0]).startswith('TC')]
+    if not data:
+        return rows
+
+    def hidx(name):
+        for i, h in enumerate(header):
+            if re.sub(r'\(固定\)$', '', str(h)) == name:
+                return i
+        return None
+
+    def val(row, i):
+        return re.sub(r'\(固定\)$', '', _norm(row[i])) if i is not None and i < len(row) else ''
+
+    def raw_of(g, key):
+        c = cols[g]
+        opts, raws = c.get('opts') or [], c.get('opts_raw') or c.get('opts') or []
+        return raws[opts.index(key)] if key in opts and opts.index(key) < len(raws) else key
+
+    ti = header.index('テスト区分') if 'テスト区分' in header else 1
+    ki = header.index('選択肢の適切さ確認') if '選択肢の適切さ確認' in header else None
+    di = header.index(DAIKA_COL) if DAIKA_COL in header else None
+    width = len(header)
+
+    def pad(r):
+        r = list(r)
+        while len(r) < width:
+            r.append('')
+        return r
+
+    def add_kanten(r, text):
+        if ki is None or not text:
+            return
+        cur = str(r[ki]).strip()
+        if cur.startswith('・選択肢が商品') or cur == REGRESSION_KANTEN:
+            cur = ''
+        if text not in cur:
+            r[ki] = (cur + '\n' + text) if cur else text
+
+    def new_row(src, kubun):
+        r = pad(src)
+        r[ti] = kubun
+        if di is not None:
+            r[di] = DAIKA_DITTO
+        if ki is not None:
+            r[ki] = ''
+        return r
+
+    def cname(g):
+        return cols[g].get('name', '')
+
+    def disp(g):
+        return cname(g).replace(EXT_MARK, '').replace('（外的要因）', '').strip()
+
+    # 条件付きの注（fix/close）で、条件列がTCに無いものは効かせられない
+    crules = []
+    for r in rules:
+        if r['kind'] == 'ext':
+            continue
+        idx = [(hidx(cname(g)), ch, g) for g, ch in r['conds']]
+        ti_ = hidx(cname(r['targets'][0])) if r['targets'] else None
+        if any(i is None for i, _, _ in idx) or (r['kind'] == 'fix' and ti_ is None):
+            print(f"【(注)を反映できず(条件の列がTCに無い)】{r['raw']}")
+            continue
+        crules.append((r, idx))
+
+    def fires(row, idx):
+        return all(val(row, i) == ch for i, ch, _ in idx)
+
+    def fix_for(row, tgt_g):
+        for r, idx in crules:
+            if r['kind'] == 'fix' and r['targets'][0] == tgt_g and fires(row, idx):
+                return r['fix']
+        return None
+
+    touched = set()   # ずらした／固定で書き換えた行（重複になり得る）
+    # 1) 固定の対象列で既定以外の値を試している行は、条件列をずらして「選べる側」の網羅を残す
+    #    （対象列が既定値の行は、条件列の側を試している行なので、ずらさず固定値で上書きする）
+    for r, idx in crules:
+        if r['kind'] != 'fix':
+            continue
+        tg = r['targets'][0]
+        tix = hidx(cname(tg))
+        t_default = (cols[tg].get('opts') or [''])[0]
+        for row in data:
+            v = val(row, tix)
+            if not fires(row, idx) or v in ('', '-', r['fix'], t_default):
+                continue
+            moved = False
+            for i, _, g in idx:
+                for key in (cols[g].get('opts') or []):
+                    trial = list(row)
+                    trial[i] = raw_of(g, key)
+                    if fix_for(trial, tg) is None:
+                        old = _norm(row[i])
+                        row[i] = trial[i]
+                        if ki is not None and old:   # 観点に残った旧い値も書き換える
+                            row[ki] = str(row[ki]).replace(f'「{old}」', f'「{key}」')
+                        touched.add(id(row))
+                        moved = True
+                        break
+                if moved:
+                    break
+
+    added = []
+    # 2) 条件がすべて成り立つ行が無い注は、土台行（先頭）を複製して1行足す
+    for r, idx in crules:
+        if any(fires(row, idx) for row in data + added):
+            continue
+        nr = new_row(data[0], '差分')
+        for i, ch, g in idx:
+            nr[i] = raw_of(g, ch)
+        added.append(nr)
+    # 3) 外的要因による固定: 対象列だけを固定値にした行を足す
+    ext_rows = []
+    for r in rules:
+        if r['kind'] != 'ext':
+            continue
+        tg = r['targets'][0]
+        tix = hidx(cname(tg))
+        if tix is None:
+            print(f"【(注)を反映できず(対象の列がTCに無い)】{r['raw']}")
+            continue
+        nr = new_row(data[0], EXT_KUBUN_LABEL)
+        nr[tix] = r['fix_raw'] + '(固定)'
+        add_kanten(nr, f'・外的要因（地域版の工種などから送られる値）により「{disp(tg)}」が'
+                       f'「{_mk_disp(r["fix_idx"])}{r["fix"]}」に固定され、選べないこと')
+        ext_rows.append((nr, tix))
+    # 4) (外的要因) 列: 通常の行では「-」、選択肢ごとに外的要因の行を足す
+    blanked = set()
+    for c in ext_cols:
+        cix = hidx(cname(c))
+        if cix is None:
+            continue
+        for row in data + added:
+            if row[cix] not in ('', '-'):
+                row[cix] = '-'
+                blanked.add(id(row))
+        col = cols[c]
+        keys = ['任意'] if col.get('numeric') else (col.get('opts') or [])
+        for key in keys:
+            nr = new_row(data[0], EXT_KUBUN_LABEL)
+            nr[cix] = '任意' if col.get('numeric') else raw_of(c, key)
+            add_kanten(nr, f'・外的要因（地域版の工種などから送られる値）により「{disp(c)}」が開き、'
+                           f'「{key}」を選べること')
+            ext_rows.append((nr, cix))
+
+    out = [header] + data + added + [r for r, _ in ext_rows]
+    # 足した行・ずらした行にも既存の(注)ゲートを当て直す（冪等）
+    #   （「②(固定)」のセルも源泉として効く＝連鎖先が「-」になる。連鎖先は注に書かせない設計）
+    out = apply_g30_gating(out, g30)
+
+    # 5) 条件付きの注を効かせる（固定の観点は注ごとに最初の1行だけ。既定行で効くと全行に付いて読みにくい）
+    fix_noted = set()
+    for row in out[1:]:
+        for r, idx in crules:
+            if not fires(row, idx):
+                continue
+            if r['kind'] == 'close':
+                for tg in r['targets']:
+                    tix = hidx(cname(tg))
+                    if tix is not None and tix < len(row):
+                        row[tix] = '-'
+                conds = ' かつ '.join(f'「{cname(g)}」が「{ch}」' for _, ch, g in idx)
+                tstr = '・'.join(f'「{cname(t)}」' for t in r['targets'])
+                add_kanten(row, f'・{conds}の場合、{tstr} が入力対象外(不要)になっていること')
+            else:
+                tg = r['targets'][0]
+                tix = hidx(cname(tg))
+                if row[tix] in ('', '-'):
+                    continue   # 入力不要の注が優先（read_gjoken で矛盾として名指し済み）
+                row[tix] = r['fix_raw'] + '(固定)'
+                touched.add(id(row))
+                if id(r) in fix_noted:
+                    continue
+                fix_noted.add(id(r))
+                conds = ' かつ '.join(f'「{cname(g)}」が「{ch}」' for _, ch, g in idx)
+                add_kanten(row, f'・{conds}の場合、「{cname(tg)}」が'
+                                f'「{_mk_disp(r["fix_idx"])}{r["fix"]}」に自動で決まり、選べないこと')
+            if str(row[ti]).strip() == '回帰':
+                row[ti] = '差分'
+
+    # (外的要因)列を「-」にした・固定値で上書きした結果、同じ条件の並びになった行は重複なので落とす
+    #   （落とす行の確認観点は残す行へ引き継ぐ）
+    lead, tail = len(_LEAD_COLS), len(_TAIL_COLS)
+    seen = {}
+    final = [header]
+    for row in out[1:]:
+        key = tuple(row[lead:len(header) - tail])
+        mine = id(row) in blanked or id(row) in touched
+        keep = seen.get(key)
+        if keep is not None and (mine or id(keep) in blanked or id(keep) in touched):
+            if ki is not None:
+                for line in str(row[ki]).split('\n'):
+                    if line.strip() and line not in str(keep[ki]).split('\n'):
+                        keep[ki] = (str(keep[ki]) + '\n' + line) if str(keep[ki]).strip() else line
+            continue
+        seen.setdefault(key, row)
+        final.append(row)
+    for i, r in enumerate(final[1:], 1):
+        r[0] = f'TC-{i:03d}'
+    return final
 
 
 def drop_unused_condition_columns(rows):
@@ -1878,6 +2234,7 @@ def build_tc_from_single_gjoken(g30):
     for r in out[1:]:
         n_tc += 1
         r[0] = f'TC-{n_tc:03d}'
+    out = apply_rule_notes(out, g30)   # かつ／固定／外的要因（該当が無ければ不変）
     out = drop_unused_condition_columns(out)
     return out
 
@@ -2024,6 +2381,7 @@ def run(csv20, csv30, old_json, out_dir=None, src20=None, src30=None):
     #   前に当てると、reconcile が後付けする列を源泉とする注が「源泉列なし」で
     #   黙って読み飛ばされ、無筋の行に鉄筋側の値が残っていた。
     out = apply_g30_gating(out, g30)
+    out = apply_rule_notes(out, g30)   # かつ／固定／外的要因（該当が無ければ不変）
     out = drop_unused_condition_columns(out)
     out = reorder_by_g30(out, g30)
     out = drop_placeholder_kanten(out)

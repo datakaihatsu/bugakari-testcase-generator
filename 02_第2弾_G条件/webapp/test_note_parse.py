@@ -391,7 +391,8 @@ class TestNoteSheet(unittest.TestCase):
                 '2. G1条件で② → G2条件（形の崩れた注）']))
             rows = G.note_sheet_rows(g)
         self.assertEqual(rows[0], ['注', '判定', '条件', '選択肢',
-                                   '入力不要になる条件', '原文'])
+                                   '入力不要になる条件', '原文', '種別'])
+        self.assertEqual(rows[1][6], '入力不要')
         first = rows[1]
         self.assertEqual(first[1], '反映')
         self.assertIn('照明器具1台当たりの単価計上方法', first[2])

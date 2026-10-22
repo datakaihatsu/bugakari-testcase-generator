@@ -77,6 +77,9 @@ def main():
             print('ガイド xlsx (v%s) が 資料/ にありません。先に scripts/gen_limitations_xlsx.py を実行してください。'
                   % APP_VERSION)
             return 1
+        # 既存zipに入っていた古い版のガイドは外す（v1.5.0 で v1.4.0 版が残っていた）
+        for old in glob.glob(os.path.join(work, '*（制限事項と切り分けガイド）_v*.xlsx')):
+            os.remove(old)
         shutil.copy2(g[0], os.path.join(work, os.path.basename(g[0])))
     # 再zip（相対パスは / 区切り・ディレクトリエントリなし）
     if os.path.exists(dst_zip):
