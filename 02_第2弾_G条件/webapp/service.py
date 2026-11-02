@@ -25,6 +25,8 @@ import json
 import traceback
 import contextlib
 import tempfile
+import threading
+import time
 
 _HERE = os.path.dirname(os.path.abspath(__file__))
 _PARENT = os.path.dirname(_HERE)  # 02_第2弾_G条件（gen_gjoken/gen_tc_from_gjoken の場所）
@@ -43,6 +45,7 @@ _ENGINE = os.path.join(_PARENT, 'engine')
 if _ENGINE not in sys.path:
     sys.path.insert(0, _ENGINE)
 import flow_walker  # 生成の時間上限(組合せ爆発時の最終防壁)を設定するため
+import gjoken_reach  # 到達走査の歩行回数を進捗表示に使うため
 
 DEFAULT_CONFIG = {
     'expcd_path': locate.DEFAULT_EXPCD,
@@ -260,11 +263,86 @@ def settings_state(cfg=None):
 # ----------------------------------------------------------------------------
 # 共通ユーティリティ
 # ----------------------------------------------------------------------------
-def _capture(func, *args, **kwargs):
-    """func の stdout を捕捉して (戻り値, ログ文字列) を返す。build_g/run のprint対策。"""
-    buf = io.StringIO()
-    with contextlib.redirect_stdout(buf):
-        result = func(*args, **kwargs)
+# ---- 実行中の進み具合（画面の進捗表示・2026-11-02 前田さん要望） ----
+#   生成は1リクエストの中で同期的に走るので、その間に画面が /api/progress で問い合わせる。
+#   段階はエンジンが今も実行ログに出している目印の行で切り替える（エンジンの出力は変えない）。
+#   (段階名, 次の段階へ進める目印の行)。目印が None の段階は最初の段階。
+PROGRESS_STAGES = {
+    'g': [('歩掛JSONを読み込み、テスト計画を作成', None),
+          ('質問のつながりを調べています', 'テスト計画生成完了'),
+          ('G条件をExcelに書き出し', '[到達走査] 歩行')],
+    'tc': [('G条件を読み込み、商品と改修後を比べています', None),
+           ('改定前JSONの質問のつながりを調べています', '【改定前JSON解析'),
+           ('テストケースを組み立て', '差分レポート生成完了'),
+           ('Excelに書き出し', '③改定後TC叩き台 生成完了')],
+    'tcnew': [('G条件を読み込み', None),
+              ('テストケースを組み立て', 'テスト計画生成完了'),
+              ('Excelに書き出し', '新規歩掛TC叩き台 生成完了')],
+}
+_PROGRESS = {'running': False}
+_PROGRESS_LOCK = threading.Lock()
+
+
+def _progress_start(tab):
+    with _PROGRESS_LOCK:
+        _PROGRESS.clear()
+        _PROGRESS.update({'running': True, 'tab': tab, 'started': time.time(),
+                          'stage': 0, 'walks': 0})
+    gjoken_reach.on_walk = _progress_walk
+
+
+def _progress_walk(n):
+    _PROGRESS['walks'] = n
+
+
+def _progress_line(line):
+    stages = PROGRESS_STAGES.get(_PROGRESS.get('tab'), [])
+    for i in range(_PROGRESS.get('stage', 0) + 1, len(stages)):
+        if stages[i][1] and stages[i][1] in line:
+            with _PROGRESS_LOCK:
+                _PROGRESS['stage'] = i
+                _PROGRESS['walks'] = 0   # 段階ごとに数え直す
+            break
+
+
+def _progress_end():
+    gjoken_reach.on_walk = None
+    with _PROGRESS_LOCK:
+        _PROGRESS['running'] = False
+
+
+def get_progress():
+    """画面用: {running, tab, elapsed(秒), stage(0始まり), stages[段階名], walks(到達走査の回数)}"""
+    with _PROGRESS_LOCK:
+        p = dict(_PROGRESS)
+    if not p.get('running'):
+        return {'running': False}
+    return {'running': True, 'tab': p['tab'], 'elapsed': int(time.time() - p['started']),
+            'stage': p['stage'], 'walks': p['walks'],
+            'stages': [s for s, _ in PROGRESS_STAGES.get(p['tab'], [])]}
+
+
+class _ProgressBuf(io.StringIO):
+    """捕捉しつつ、行ごとに進捗の目印を見る。"""
+
+    def write(self, s):
+        for line in s.splitlines():
+            _progress_line(line)
+        return super().write(s)
+
+
+def _capture(func, *args, _tab=None, **kwargs):
+    """func の stdout を捕捉して (戻り値, ログ文字列) を返す。build_g/run のprint対策。
+    _tab: 進捗表示の対象（'g'/'tc'/'tcnew'）。指定時は実行中の進み具合を get_progress で読める。"""
+    buf = _ProgressBuf() if _tab else io.StringIO()
+    if _tab:
+        _progress_start(_tab)
+    try:
+        with contextlib.redirect_stdout(buf):
+            result = func(*args, **kwargs)
+    finally:
+        if _tab:
+            _progress_end()
     return result, buf.getvalue()
 
 
@@ -385,7 +463,8 @@ def gen_g(json_path, cfg=None, out_dir=None, dan=None):
         wd = out_dir or new_workdir(cfg, 'geng_')
         out['workdir'] = wd
         # label='' → 素の名前「Gaia入力基準表_<工種>(<単位>).csv」
-        res, log = _capture(gen_gjoken.build_g_ex, json_path, wd, '', dan=bool(dan))
+        res, log = _capture(gen_gjoken.build_g_ex, json_path, wd, '', dan=bool(dan),
+                            _tab='g')
         csv_path = res['csv']
         out['csv_path'] = csv_path
         out['log'] = log
@@ -441,7 +520,7 @@ def gen_tc(g20, g30, old_json, cfg=None, out_dir=None):
         # 段付きG条件は③が自動判別する（①のモードに依存しない）。注の解釈表示は段を戻した表で
         flat30, out['dan_read'] = _dan_view(csv20, csv30, g20, g30, wd)
         out['note_lint'] = _note_lint(flat30)
-        s3, log = _capture(gen_tc_from_gjoken.run, csv20, csv30, old_json, wd,
+        s3, log = _capture(gen_tc_from_gjoken.run, csv20, csv30, old_json, wd, _tab='tc',
                            src20=g20, src30=g30)
         out['csv_path'] = s3
         out['log'] = log
@@ -486,7 +565,8 @@ def gen_tc_new(g30, cfg=None, out_dir=None):
         csv30 = _to_csv(g30, wd, '30_G条件.csv')
         flat30, out['dan_read'] = _dan_view(None, csv30, None, g30, wd)
         out['note_lint'] = _note_lint(flat30)
-        s3, log = _capture(gen_tc_from_gjoken.run_single, csv30, wd, koshu, src30=g30)
+        s3, log = _capture(gen_tc_from_gjoken.run_single, csv30, wd, koshu, src30=g30,
+                           _tab='tcnew')
         out['csv_path'] = s3
         out['log'] = log
         xlsx = os.path.join(wd, 'テストケース_%s.xlsx' % (koshu or '出力'))

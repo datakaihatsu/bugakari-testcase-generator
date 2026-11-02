@@ -98,6 +98,12 @@ details.log pre {
 .handoff { font-size: 13px; margin-bottom: 8px; }
 .handoff .chip { background: var(--cond); padding: 3px 10px; border-radius: 12px; }
 .spinner { color: var(--hint); font-size: 13px; }
+.progress { font-size: 13px; }
+.progress ol { list-style: none; margin: 6px 0 4px; padding-left: 8px; }
+.progress li { margin: 2px 0; }
+.progress li.done, .progress li.todo { color: var(--hint); }
+.progress li.now { font-weight: 700; }
+.progress .hint { margin-left: 0; }
 .hidden { display: none; }
 
 /* 格納場所の変更パネル（普段は hidden。外付けSSD等へデータを移した端末だけが使う） */

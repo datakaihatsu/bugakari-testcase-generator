@@ -20,6 +20,7 @@ http.server ベース。127.0.0.1 バインドの単一ユーザ用ローカル�
   GET  /api/settings         現在の格納場所・出所（既定/ユーザ設定）・実在チェック
   POST /api/settings         {action: derive|check|save|reset} 格納場所の変更（画面の「変更」）
   POST /api/dan_mode         {on} ①G条件の出力形式（段あり/段なし）を保存（ユーザ設定・ツール更新でも残る）
+  GET  /api/progress         実行中の生成の進み具合（段階・経過秒・到達走査の回数）
   GET  /api/report_info?tab= 「問題・要望を送る」ダイアログ用（送信者・送る内容・弾かれた注）
                              tab=latest はタブを問わず直近の実行（ヘッダーのボタン用）
   POST /api/report           {tab, kind, comment, notes} 直近の実行を報告パック(zip)にして報告箱へ保存
@@ -161,6 +162,8 @@ class Handler(BaseHTTPRequestHandler):
             self._serve_static('index.html')
         elif route.startswith('/static/'):
             self._serve_static(route[len('/static/'):])
+        elif route == '/api/progress':
+            self._send_json(service.get_progress())
         elif route == '/api/config':
             self._send_json({
                 'app_version': version.APP_VERSION,

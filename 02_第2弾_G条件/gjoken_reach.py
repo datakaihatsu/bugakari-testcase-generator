@@ -44,6 +44,10 @@ from generate_proposals import TestPlanGenerator        # noqa: E402
 # F-R6: 探索歩行数の上限。実測最大は 4,487 歩行（回帰40工種）。
 MAX_WALKS = 50000
 
+# 画面の進捗表示用（2026-11-02 前田さん「止まっているのか動いているのか分からない」）。
+#   歩行のたびに回数を渡す。ログには出さない（実行ログ・回帰の出力を変えないため）。
+on_walk = None
+
 
 class ReachExplosionError(RuntimeError):
     """探索が上限を超えた（本ツールの守備範囲外の大規模歩掛）。"""
@@ -77,6 +81,8 @@ class _Walker:
                 'ツールのため、この歩掛は対象外です。'
                 '必要な場合は工種キーを開発担当へお知らせください。' % format(MAX_WALKS, ','))
         self.n += 1
+        if on_walk is not None:
+            on_walk(self.n)
         res = FlowWalker(self.bj, vary_selections=dict(sel)).walk()
         v = _Visited(list(res.get('visited_sitsumons', [])))
         v.src = dict(res.get('row_sources', {}))

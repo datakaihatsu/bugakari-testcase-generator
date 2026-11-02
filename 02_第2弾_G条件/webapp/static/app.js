@@ -51,6 +51,43 @@ function logBlock(r) {
 function reportBtn(tab) {
   return `<div class="row"><button type="button" class="reportbtn" data-tab="${tab}">📮 この結果について問題・要望を送る</button></div>`;
 }
+// 生成中の進み具合（2026-11-02 前田さん「止まっているのか動いているのか分からない」）。
+// 生成のリクエストを待つ間、1秒ごとに /api/progress を聞いて段階・経過秒・到達走査の回数を出す。
+// 経過秒は画面側で数える（サーバの応答が遅れても、動いていることは見える）。
+function progressHtml(p, sec) {
+  const stages = (p && p.stages) || [];
+  const items = stages.map((name, i) => {
+    if (i < p.stage) return `<li class="done">✓ ${i + 1}/${stages.length} ${esc(name)}</li>`;
+    if (i > p.stage) return `<li class="todo">${i + 1}/${stages.length} ${esc(name)}</li>`;
+    const n = p.walks ? `（${p.walks.toLocaleString()}回目）` : '';
+    return `<li class="now">▶ ${i + 1}/${stages.length} ${esc(name)}${n}</li>`;
+  }).join('');
+  return `<div class="progress"><div>生成中…（${sec}秒経過）</div>`
+    + (items ? `<ol>${items}</ol>` : '')
+    + '<div class="hint">工種によっては1分ほどかかります。この画面を閉じずにお待ちください。</div></div>';
+}
+async function runWithProgress(box, tab, request) {
+  const t0 = Date.now();
+  let last = null;
+  let done = false;
+  const draw = () => { if (!done) box.innerHTML = progressHtml(last, Math.floor((Date.now() - t0) / 1000)); };
+  draw();
+  const iv = setInterval(async () => {
+    try {
+      const p = await (await fetch('/api/progress')).json();
+      if (p.running && p.tab === tab) last = p;
+    } catch (e) { /* 次の回で聞き直す */ }
+    draw();
+  }, 1000);
+  try {
+    return await request();
+  } catch (e) {
+    return { error: `ツールのサーバに接続できませんでした（黒い画面が閉じていないか確認してください）: ${e}` };
+  } finally {
+    done = true;
+    clearInterval(iv);
+  }
+}
 function fileToBase64(file) {
   return new Promise((resolve, reject) => {
     const fr = new FileReader();
@@ -145,9 +182,9 @@ function renderLocate(r, box) {
 $('btnGenG').addEventListener('click', async () => {
   const box = $('genGResult');
   if (!selectedJsonPath) { box.innerHTML = '<span class="err">版を選択してください</span>'; return; }
-  box.innerHTML = '生成中…';
   $('btnGenG').disabled = true;
-  const r = await postJSON('/api/gen_g', { json_path: selectedJsonPath, dan: danModeOn() });
+  const r = await runWithProgress(box, 'g',
+    () => postJSON('/api/gen_g', { json_path: selectedJsonPath, dan: danModeOn() }));
   $('btnGenG').disabled = false;
   if (r.error) { box.innerHTML = `<span class="err">${esc(r.error)}</span>${reportBtn('g')}${logBlock(r)}`; return; }
   const verLabel = r.apply_ymd ? `適用 ${r.apply_ymd} 版・` : '';
@@ -193,11 +230,8 @@ $('btnGenTC').addEventListener('click', async () => {
     body.g20_b64 = await fileToBase64(g20f);
     body.g20_name = g20f.name;
   }
-  box.innerHTML = '';
-  $('tcSpinner').classList.remove('hidden');
   $('btnGenTC').disabled = true;
-  const r = await postJSON('/api/gen_tc', body);
-  $('tcSpinner').classList.add('hidden');
+  const r = await runWithProgress(box, 'tc', () => postJSON('/api/gen_tc', body));
   $('btnGenTC').disabled = false;
   if (r.error) { box.innerHTML = `<span class="err">${esc(r.error)}</span>${noteLintBlock(r)}${reportBtn('tc')}${logBlock(r)}`; return; }
   box.innerHTML = `<div class="summary ok">テストケースを生成しました（TC ${r.tc_count} 件 / 列 ${r.col_count}）</div>`
@@ -214,11 +248,10 @@ $('btnGenTCNew').addEventListener('click', async () => {
   const box = $('genTCNewResult');
   const f = $('gnewFile').files[0];
   if (!f) { box.innerHTML = '<span class="err">枠C（改修後G条件）のファイルを選んでください</span>'; return; }
-  box.innerHTML = '';
-  $('tcNewSpinner').classList.remove('hidden');
   $('btnGenTCNew').disabled = true;
-  const r = await postJSON('/api/gen_tc_new', { g30_b64: await fileToBase64(f), g30_name: f.name });
-  $('tcNewSpinner').classList.add('hidden');
+  const b64 = await fileToBase64(f);
+  const r = await runWithProgress(box, 'tcnew',
+    () => postJSON('/api/gen_tc_new', { g30_b64: b64, g30_name: f.name }));
   $('btnGenTCNew').disabled = false;
   if (r.error) { box.innerHTML = `<span class="err">${esc(r.error)}</span>${noteLintBlock(r)}${reportBtn('tcnew')}${logBlock(r)}`; return; }
   box.innerHTML = `<div class="summary ok">テストケースを生成しました（TC ${r.tc_count} 件 / 列 ${r.col_count}）</div>`
