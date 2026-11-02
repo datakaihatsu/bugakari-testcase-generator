@@ -345,8 +345,65 @@ _EXT_NOTE = re.compile(r'^外的要因により\s*G(\d+)\s*[=＝]\s*(.+?)\s*(?:�
 _FIX_TAIL = re.compile(r'G(\d+)(?:条件)?(「[^」]*」)?\s*(?:は|が)\s*(.+?)\s*(?:で|に)固定され(?:る|ます)')
 _COND_HEAD = re.compile(r'G(\d+)条件(「[^」]*」)?\s*(?:で|が)\s*(.+)$')
 NOTE_FORMS_HINT = ('使える形は「G2条件で②を選択した場合は、G3条件を入力する必要はない。」'
+                   '「G2条件で②を選択した場合は、G3条件を選択する。」'
                    '「G1条件で①を選択した場合 かつ G4条件が①の場合は、G12条件は①で固定される。」'
-                   '「外的要因により G3=② に固定される」の3つです')
+                   '「外的要因により G3=② に固定される」の4つです')
+
+# --- 開く書き方の(注)（2026-11-02 前田さん 除雪グレーダ運転 注25） ---
+#     G17条件で⑮を選択した場合は、G50条件を選択する。
+#   = G50 は G17 が⑮のときだけ出る。G条件は注で閉じない限り全列入力が前提なので、
+#   わざわざ「選択する」と書くのは「そのときだけ」の意味と読む。
+#   ⑮以外の選択肢ごとに「入力不要」の注へ裏返して notes に入れる（下流は従来どおり）。
+#   「かつ」付きは裏返すと「または」になり今の注で表せないため読まない（分けて書いてもらう）。
+_OPEN_NOTE = re.compile(
+    r'^G(\d+)条件(「[^」]*」)?\s*で\s*(.+?)(?:のいずれか)?を選択した場合(?:は|には)?[、，,\s]*'
+    r'(G\d+.*?)\s*(?:を|は)\s*(?:入力|選択)(?:[（(](?:入力|選択)[)）])?'
+    r'(?:する|します)(?:必要が(?:ある|あります))?\s*[。．]?\s*$')
+_OPEN_TAIL = re.compile(r'(?:入力|選択)(?:[（(](?:入力|選択)[)）])?(?:する|します)'
+                        r'(?:必要が(?:ある|あります))?\s*[。．]?\s*$')
+
+
+def _parse_open_note(raw, cols, gnums, issues, where):
+    """開く書き方の注を読む。
+    戻り値: {'src_g', 'chosen': [選択肢index], 'others': [裏返した選択肢index],
+             'targets': [列index], 'raw'} / この形でなければ None"""
+    body = _strip_note_no(raw)
+    if not _OPEN_TAIL.search(body):
+        return None
+    if re.search(r'場合[\s　、]*かつ', body):
+        issues.append({'level': 'ERROR', 'text': (
+            f'{where}: 「かつ」で条件をつないだ「…を選択する」の形は読めません'
+            f'(この注は無視されます)。「かつ」の無い形に分けるか、'
+            f'「…を入力する必要はない」の形で書いてください。 → {raw}')})
+        return None
+    m = _OPEN_NOTE.match(body)
+    if not m:
+        return None
+    src_g = _resolve_ref_g(int(m.group(1)), (m.group(2) or '')[1:-1], cols, gnums,
+                           issues, f'{where}(条件側)')
+    if src_g is None:
+        return None
+    col = cols[src_g]
+    if col['numeric']:
+        issues.append({'level': 'ERROR', 'text': (
+            f'{where}: 実数入力の条件「{col["name"]}」を「…を選択する」の形では使えません'
+            f'(この注は無視されます)。 → {raw}')})
+        return None
+    targets = _parse_targets(m.group(4), cols, gnums, issues, f'{where}(対象側)')
+    if not targets:
+        return None
+    chosen = []
+    for idx, shown in _resolve_choices(m.group(3), col, issues, where):
+        if idx is None or idx < 0:
+            issues.append({'level': 'ERROR', 'text': (
+                f'{where}: 選択肢「{shown}」が条件「{col["name"]}」の選択肢に存在しません'
+                f'(候補: {" / ".join(col["opts"])})。この注は無視されます。')})
+            return None
+        if idx not in chosen:
+            chosen.append(idx)
+    others = [i for i in range(len(col['opts'])) if i not in chosen]
+    return {'src_g': src_g, 'chosen': chosen, 'others': others, 'targets': targets,
+            'raw': raw}
 EXT_MARK = '(外的要因)'
 
 
@@ -499,6 +556,7 @@ def read_gjoken(path):
     #   → 選択肢ごとに1エントリへ展開して返す(下流ロジックは従来どおり単一選択肢前提)。
     notes = []
     rules = []   # かつ／固定／外的要因 の注（_parse_rule_note）
+    opens = []   # 開く書き方の注（_parse_open_note）。notes へは裏返して展開済み
     issues = []
     parsed = 0
     lint_lines = []
@@ -511,7 +569,10 @@ def read_gjoken(path):
         sp = None if re.search(r'場合[\s　、]*かつ', raw) else _split_note(raw)
         if sp is None:
             n_iss = len(issues)
-            rule = _parse_rule_note(raw, cols, gnums, issues, where)
+            # 開く書き方（…を選択する。）は語尾で見分けて先に読む。かつ／固定の読み方に先に
+            #   回すと「①・②のいずれか」を1つに特定できないERRORで止まるため
+            rule = (None if _OPEN_TAIL.search(_strip_note_no(raw))
+                    else _parse_rule_note(raw, cols, gnums, issues, where))
             if rule is not None:
                 rules.append(rule)
                 parsed += 1
@@ -527,6 +588,24 @@ def read_gjoken(path):
                 continue
             if len(issues) > n_iss:
                 continue   # 注の形だが参照・選択肢が解決できなかった（個別のERRORを出し済み）
+            op = _parse_open_note(raw, cols, gnums, issues, where)
+            if op is not None:
+                sg = op['src_g']
+                src_name = cols[sg]['name']
+                for i in op['others']:
+                    notes.append({'src_g': sg, 'src_name': src_name,
+                                  'src_choice': cols[sg]['opts'][i], 'targets': op['targets']})
+                opens.append(op)
+                parsed += 1
+                lint_lines.append({
+                    'no': where, 'status': '反映', 'kind': '入力が必要(それ以外は入力不要)',
+                    'src': f'G{gnums[sg]} {src_name}',
+                    'sel': ' / '.join(f'{_mk_disp(i)}{cols[sg]["opts"][i]}' for i in op['chosen']),
+                    'tgt': '・'.join(f'G{gnums[t]}「{cols[t]["name"]}」' for t in op['targets']),
+                    'raw': raw})
+                continue
+            if len(issues) > n_iss:
+                continue   # 開く書き方だが参照・選択肢が解決できなかった
             if _NOTE_LIKE.search(raw) or raw.lstrip().startswith('外的要因'):
                 issues.append({
                     'level': 'ERROR',
@@ -589,7 +668,7 @@ def read_gjoken(path):
                     f'入力不要（-）を優先します。 → {r["raw"]}')})
     ext_cols = [i for i, c in enumerate(cols)
                 if EXT_MARK in c['name'] or '（外的要因）' in c['name']]
-    return {'cols': cols, 'gnums': gnums, 'notes': notes, 'rules': rules,
+    return {'cols': cols, 'gnums': gnums, 'notes': notes, 'rules': rules, 'opens': opens,
             'ext_cols': ext_cols,
             'note_issues': issues, 'note_lines': lint_lines,
             'note_raw_count': len(notes_raw), 'note_parsed_count': parsed}

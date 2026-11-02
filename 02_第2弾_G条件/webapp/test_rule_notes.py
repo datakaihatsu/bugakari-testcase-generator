@@ -16,6 +16,8 @@ test_rule_notes.py ― 「かつ」「固定される」「外的要因により
   - (外的要因) 列: 通常の行は「-」、選択肢ごとに区分「外的要因」の行
   - 固定値が選択肢に無い／入力不要と固定の矛盾 → ERROR で名指し
   - 注も (外的要因) 列も無ければ apply_rule_notes は何もしない
+  - 開く書き方「…の場合は、G4条件を選択する。」は「それ以外なら入力不要」に裏返して notes に入る
+    （2026-11-02 前田さん 除雪グレーダ運転 注25）。「かつ」付きは ERROR で案内
 """
 
 import os
@@ -112,6 +114,42 @@ class TestParse(unittest.TestCase):
         self.assertTrue(err)
         self.assertIn('固定される', err[0])
         self.assertIn('外的要因により', err[0])
+
+    def test_open_note_inverted_to_close(self):
+        """開く書き方（2026-11-02 前田さん 除雪グレーダ運転 注25）: ③のときだけ G4 が出る。"""
+        with tempfile.TemporaryDirectory() as td:
+            g = G.read_gjoken(_write(td, ['25. G1条件で③を選択した場合は、G4条件を選択する。']))
+        self.assertEqual(g['note_parsed_count'], 1)
+        self.assertFalse([i for i in g['note_issues'] if i['level'] == 'ERROR'])
+        self.assertEqual(g['rules'], [])
+        self.assertEqual(sorted((n['src_choice'], n['targets']) for n in g['notes']),
+                         [('整備局', [3]), ('香川県', [3])])
+        self.assertEqual(g['opens'][0]['chosen'], [2])
+        sheet = G.note_sheet_rows(g)
+        self.assertIn('入力が必要', sheet[1][6])
+
+    def test_open_note_tail_variants(self):
+        for tail in ['G4条件を入力する。', 'G4条件を選択する必要がある。', 'G4条件を入力（選択）する必要がある',
+                     'G4条件を選択します。']:
+            with tempfile.TemporaryDirectory() as td:
+                g = G.read_gjoken(_write(td, ['G1条件で①・②のいずれかを選択した場合は、' + tail]))
+            self.assertEqual([n['src_choice'] for n in g['notes']], ['高松市'], tail)
+
+    def test_open_note_with_katsu_is_error(self):
+        with tempfile.TemporaryDirectory() as td:
+            g = G.read_gjoken(_write(td, [
+                'G1条件で①を選択した場合 かつ G2条件で①を選択した場合は、G4条件を選択する。']))
+        self.assertEqual((g['notes'], g['rules'], g['note_parsed_count']), ([], [], 0))
+        err = [i['text'] for i in g['note_issues'] if i['level'] == 'ERROR']
+        self.assertEqual(len(err), 1)
+        self.assertIn('かつ', err[0])
+
+    def test_open_note_tc(self):
+        with tempfile.TemporaryDirectory() as td:
+            g = G.read_gjoken(_write(td, ['G1条件で③を選択した場合は、G4条件を選択する。']))
+        rows = G.build_tc_from_single_gjoken(g)
+        for a, d in zip(_col(rows, '発注者'), _col(rows, '土砂数量')):
+            self.assertEqual(d == '-', a != '高松市', (a, d))
 
     def test_contradiction_named(self):
         with tempfile.TemporaryDirectory() as td:
