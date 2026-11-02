@@ -346,8 +346,9 @@ _FIX_TAIL = re.compile(r'G(\d+)(?:条件)?(「[^」]*」)?\s*(?:は|が)\s*(.+?)
 _COND_HEAD = re.compile(r'G(\d+)条件(「[^」]*」)?\s*(?:で|が)\s*(.+)$')
 NOTE_FORMS_HINT = ('使える形は「G2条件で②を選択した場合は、G3条件を入力する必要はない。」'
                    '「G2条件で②を選択した場合は、G3条件を選択する。」'
+                   '「G2条件で②を選択した場合は、G3条件で①～③から選択する。」'
                    '「G1条件で①を選択した場合 かつ G4条件が①の場合は、G12条件は①で固定される。」'
-                   '「外的要因により G3=② に固定される」の4つです')
+                   '「外的要因により G3=② に固定される」の5つです')
 
 # --- 開く書き方の(注)（2026-11-02 前田さん 除雪グレーダ運転 注25） ---
 #     G17条件で⑮を選択した場合は、G50条件を選択する。
@@ -361,6 +362,67 @@ _OPEN_NOTE = re.compile(
     r'(?:する|します)(?:必要が(?:ある|あります))?\s*[。．]?\s*$')
 _OPEN_TAIL = re.compile(r'(?:入力|選択)(?:[（(](?:入力|選択)[)）])?(?:する|します)'
                         r'(?:必要が(?:ある|あります))?\s*[。．]?\s*$')
+
+
+# --- 選択肢を絞る(注)（2026-11-02 前田さん 除雪グレーダ運転 注26。09-29 FB会でも同じ要望） ---
+#     G50条件で①･②を選択した場合、G20条件で①～④から選択する。   … 選べる側を書く（正式な型）
+#     G50条件で①･②を選択した場合、G20条件で⑤は選択できない。     … 選べない側を書く（依頼者の書き方）
+#   質問は出たまま選択肢の一部だけが出る。どちらも「選べる選択肢」の一覧に直して rules(kind=limit) に入れる。
+#   「…を入力する必要はない」の _split_note より先に読む（「G20条件で⑤は選択できない」を
+#   G20 まるごとの入力不要と誤読するため）。
+_LIMIT_NOTE = re.compile(
+    r'^G(\d+)条件(「[^」]*」)?\s*で\s*(.+?)(?:のいずれか)?を選択した場合(?:は|には)?[、，,\s]*'
+    r'G(\d+)条件(「[^」]*」)?\s*で\s*(.+?)\s*'
+    r'(?:(?P<allow>(?:の中|のうち)?から\s*(?:選択|選べ)(?:する|します|できる|ます|る))'
+    r'|(?P<deny>(?:は|を)\s*(?:選択|選べ|表示され)(?:でき)?(?:ない|ません)))'
+    r'\s*[。．]?\s*$')
+
+
+def _parse_limit_note(raw, cols, gnums, issues, where):
+    """選択肢を絞る注を読む。戻り値: rule のリスト（条件の選択肢ごとに1つ）/ この形でなければ None"""
+    body = re.sub(r'[〜~]', '～', _strip_note_no(raw))
+    m = _LIMIT_NOTE.match(body)
+    if not m:
+        return None
+    src_g = _resolve_ref_g(int(m.group(1)), (m.group(2) or '')[1:-1], cols, gnums,
+                           issues, f'{where}(条件側)')
+    tg = _resolve_ref_g(int(m.group(4)), (m.group(5) or '')[1:-1], cols, gnums,
+                        issues, f'{where}(対象側)')
+    if src_g is None or tg is None:
+        return []
+    for g in (src_g, tg):
+        if cols[g]['numeric']:
+            issues.append({'level': 'ERROR', 'text': (
+                f'{where}: 実数入力の条件「{cols[g]["name"]}」は選択肢を絞る注に使えません'
+                f'(この注は無視されます)。 → {raw}')})
+            return []
+
+    def idxs(sel, col):
+        out = []
+        for i, shown in _resolve_choices(sel, col, issues, where):
+            if i is None or i < 0:
+                issues.append({'level': 'ERROR', 'text': (
+                    f'{where}: 選択肢「{shown}」が条件「{col["name"]}」の選択肢に存在しません'
+                    f'(候補: {" / ".join(col["opts"])})。この注は無視されます。')})
+                return None
+            if i not in out:
+                out.append(i)
+        return out
+
+    src = idxs(m.group(3), cols[src_g])
+    named = idxs(m.group(6), cols[tg])
+    if src is None or named is None:
+        return []
+    allowed = named if m.group('allow') else [i for i in range(len(cols[tg]['opts']))
+                                              if i not in named]
+    if not allowed:
+        issues.append({'level': 'ERROR', 'text': (
+            f'{where}: 「{cols[tg]["name"]}」で選べる選択肢が1つも残りません'
+            f'(この注は無視されます)。 → {raw}')})
+        return []
+    return [{'kind': 'limit', 'conds': [(src_g, cols[src_g]['opts'][s])], 'targets': [tg],
+             'allowed': [cols[tg]['opts'][i] for i in allowed], 'allowed_idx': allowed,
+             'fix': None, 'fix_raw': None, 'raw': raw} for s in src]
 
 
 def _parse_open_note(raw, cols, gnums, issues, where):
@@ -564,6 +626,23 @@ def read_gjoken(path):
         gnums = list(range(1, len(cols) + 1))
     for ni, raw in enumerate(notes_raw, 1):
         where = f'注{ni}'
+        lim = _parse_limit_note(raw, cols, gnums, issues, where)
+        if lim is not None:
+            if lim:
+                rules.extend(lim)
+                parsed += 1
+                r0 = lim[0]
+                sg, tg = r0['conds'][0][0], r0['targets'][0]
+                lint_lines.append({
+                    'no': where, 'status': '反映', 'kind': '選択肢を絞る',
+                    'src': f'G{gnums[sg]} {cols[sg]["name"]}',
+                    'sel': ' / '.join(f'{_mk_disp(cols[sg]["opts"].index(r["conds"][0][1]))}'
+                                      f'{r["conds"][0][1]}' for r in lim),
+                    'tgt': (f'G{gnums[tg]}「{cols[tg]["name"]}」 → '
+                            + '・'.join(f'{_mk_disp(i)}{cols[tg]["opts"][i]}' for i in r0['allowed_idx'])
+                            + ' だけ選べる'),
+                    'raw': raw})
+            continue
         # 「かつ」で条件をつなぐ注は既存の文型だと「場合は、」の直前までを選択肢と誤読する
         #   （G1条件で③を選択した場合 かつ G3条件で②… → G1の③と②）ので、先に新しい読み方へ回す
         sp = None if re.search(r'場合[\s　、]*かつ', raw) else _split_note(raw)
@@ -1791,6 +1870,8 @@ def apply_rule_notes(rows, g30):
       その行が対象列の別の値を試していた行なら、条件列を固定が効かない選択肢へずらして
       「固定されない側では選べること」の網羅を残す。条件が成り立つ行が無ければ1行足す。
     - 条件付き入力不要: 条件がすべて成り立つ行で対象列を「-」。
+    - 選択肢を絞る: 条件が成り立つ行で対象列が選べない値なら、選べる値（先頭）へ差し替え、
+      「…だけが表示されること」の観点を注（条件の選択肢）ごとに最初の1行だけ添える。
     - 外的要因による固定: 土台行を複製し、対象列を「<値>(固定)」にした行を区分「外的要因」で足す。
     - (外的要因) 列: 通常の行では「-」（全国版では聞かれない）。選択肢ごとに区分「外的要因」の行を足す。
     """
@@ -1860,7 +1941,7 @@ def apply_rule_notes(rows, g30):
             continue
         idx = [(hidx(cname(g)), ch, g) for g, ch in r['conds']]
         ti_ = hidx(cname(r['targets'][0])) if r['targets'] else None
-        if any(i is None for i, _, _ in idx) or (r['kind'] == 'fix' and ti_ is None):
+        if any(i is None for i, _, _ in idx) or (r['kind'] in ('fix', 'limit') and ti_ is None):
             print(f"【(注)を反映できず(条件の列がTCに無い)】{r['raw']}")
             continue
         crules.append((r, idx))
@@ -1911,6 +1992,64 @@ def apply_rule_notes(rows, g30):
         nr = new_row(data[0], '差分')
         for i, ch, g in idx:
             nr[i] = raw_of(g, ch)
+        added.append(nr)
+    # 2b) 選択肢を絞る注: 条件が成り立ち、かつ対象の質問が出ている行が無ければ、
+    #     対象を閉じている入力不要の注の源泉列をずらして、対象が出る行を1行足す
+    #     （例: 除雪グレーダ 注26。G50=3.7m の行はどれも G18=本体にプラウ付属 で G20 が出ない）
+    notes_all = g30.get('notes') or []
+
+    def fill_val(t):
+        tix_ = hidx(cname(t))
+        for row in data:
+            if tix_ is not None and row[tix_] not in ('', '-'):
+                return row[tix_]
+        return raw_of(t, (cols[t].get('opts') or [''])[0])
+
+    def open_target(base, r, idx):
+        row = pad(base)
+        for i, ch, g in idx:
+            row[i] = raw_of(g, ch)
+        tg = r['targets'][0]
+        tix_ = hidx(cname(tg))
+        for _ in range(6):
+            blk = [nt for nt in notes_all if tg in nt['targets']
+                   and hidx(cname(nt['src_g'])) is not None
+                   and val(row, hidx(cname(nt['src_g']))) == nt['src_choice']]
+            if not blk:
+                break
+            sg, old = blk[0]['src_g'], blk[0]['src_choice']
+            if any(g == sg for _, _, g in idx):
+                return None   # 条件の選択そのものが対象を閉じる（確かめようがない）
+            alt = [k for k in (cols[sg].get('opts') or []) if k != old
+                   and not any(n['src_g'] == sg and n['src_choice'] == k and tg in n['targets']
+                               for n in notes_all)]
+            if not alt:
+                return None
+            row[hidx(cname(sg))] = raw_of(sg, alt[0])
+            for n in notes_all:   # ずらす前の選択で閉じていた列を開ける
+                if n['src_g'] == sg and n['src_choice'] == old:
+                    for t in n['targets']:
+                        ix = hidx(cname(t))
+                        if ix is not None and row[ix] in ('', '-'):
+                            row[ix] = fill_val(t)
+        else:
+            return None
+        if row[tix_] in ('', '-'):
+            row[tix_] = raw_of(tg, r['allowed'][0])
+        row = apply_g30_gating([header, row], g30)[1]
+        return row if fires(row, idx) and row[tix_] not in ('', '-') else None
+
+    for r, idx in crules:
+        if r['kind'] != 'limit':
+            continue
+        tix = hidx(cname(r['targets'][0]))
+        if any(fires(row, idx) and row[tix] not in ('', '-') for row in data + added):
+            continue
+        base = next((row for row in data + added if fires(row, idx)), data[0])
+        nr = open_target(new_row(base, '差分'), r, idx)
+        if nr is None:
+            print(f"【(注)を反映できず(対象の質問が出る行を作れない)】{r['raw']}")
+            continue
         added.append(nr)
     # 3) 外的要因による固定: 対象列だけを固定値にした行を足す
     ext_rows = []
@@ -1965,6 +2104,21 @@ def apply_rule_notes(rows, g30):
                 conds = ' かつ '.join(f'「{cname(g)}」が「{ch}」' for _, ch, g in idx)
                 tstr = '・'.join(f'「{cname(t)}」' for t in r['targets'])
                 add_kanten(row, f'・{conds}の場合、{tstr} が入力対象外(不要)になっていること')
+            elif r['kind'] == 'limit':
+                tg = r['targets'][0]
+                tix = hidx(cname(tg))
+                if row[tix] in ('', '-'):
+                    continue   # 対象の質問が出ない行では確かめられない
+                if val(row, tix) not in r['allowed']:
+                    row[tix] = raw_of(tg, r['allowed'][0])
+                    touched.add(id(row))
+                if id(r) in fix_noted:
+                    continue
+                fix_noted.add(id(r))
+                conds = ' かつ '.join(f'「{cname(g)}」が「{ch}」' for _, ch, g in idx)
+                shown = '」「'.join(r['allowed'])
+                add_kanten(row, f'・{conds}の場合、「{cname(tg)}」の選択肢は'
+                                f'「{shown}」だけが表示されること')
             else:
                 tg = r['targets'][0]
                 tix = hidx(cname(tg))

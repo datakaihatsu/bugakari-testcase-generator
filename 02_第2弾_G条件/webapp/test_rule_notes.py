@@ -151,6 +151,55 @@ class TestParse(unittest.TestCase):
         for a, d in zip(_col(rows, '発注者'), _col(rows, '土砂数量')):
             self.assertEqual(d == '-', a != '高松市', (a, d))
 
+    def test_limit_note_both_wordings(self):
+        """選択肢を絞る注（2026-11-02 前田さん 注26）: 選べる側／選べない側のどちらの書き方も同じに読む。"""
+        for note in ['26. G1条件で①･②を選択した場合、G2条件で①から選択する。',
+                     'G1条件で①・②のいずれかを選択した場合は、G2条件で②は選択できない。',
+                     'G1条件で①～②を選択した場合、G2条件で②は選べない',
+                     'G1条件で①、②を選択した場合、G2条件で①の中から選択する。']:
+            with tempfile.TemporaryDirectory() as td:
+                g = G.read_gjoken(_write(td, [note]))
+            self.assertFalse([i for i in g['note_issues'] if i['level'] == 'ERROR'], note)
+            self.assertEqual(g['notes'], [], note)   # 「G2 まるごと入力不要」と誤読しない
+            self.assertEqual([(r['kind'], r['conds'], r['allowed']) for r in g['rules']],
+                             [('limit', [(0, '整備局')], ['1t土のう']),
+                              ('limit', [(0, '香川県')], ['1t土のう'])], note)
+        sheet = G.note_sheet_rows(g)
+        self.assertEqual(sheet[1][6], '選択肢を絞る')
+
+    def test_limit_note_errors(self):
+        with tempfile.TemporaryDirectory() as td:
+            g = G.read_gjoken(_write(td, ['G1条件で①を選択した場合、G2条件で①・②は選択できない。',
+                                          'G1条件で①を選択した場合、G2条件で⑨から選択する。']))
+        self.assertEqual(g['rules'], [])
+        err = [i['text'] for i in g['note_issues'] if i['level'] == 'ERROR']
+        self.assertEqual(len(err), 2)
+        self.assertIn('1つも残りません', err[0])
+        self.assertIn('存在しません', err[1])
+
+    def test_limit_note_tc(self):
+        rows = TestTC()._build(['G1条件で③を選択した場合、G2条件で②は選択できない。'])
+        combos = set(zip(_col(rows, '発注者'), _col(rows, '袋材区分')))
+        self.assertNotIn(('高松市', '耐候性'), combos)       # Gaia で作れない組合せは残さない
+        self.assertIn(('整備局', '耐候性'), combos)          # 条件の外では選べる
+        kanten = '\n'.join(_col(rows, '選択肢の適切さ確認'))
+        self.assertEqual(kanten.count('「袋材区分」の選択肢は「1t土のう」だけが表示されること'), 1)
+
+    def test_limit_note_adds_row_where_target_shows(self):
+        """条件が成り立つ行がどれも対象の質問を閉じていたら、閉じている注の源泉をずらした行を足す。"""
+        with tempfile.TemporaryDirectory() as td:
+            g = G.read_gjoken(_write(td, ['G3条件で②を選択した場合は、G4条件を入力する必要はない。',
+                                          'G1条件で③を選択した場合、G4条件で②から選択する。']))
+        h = ['テストID', 'テスト区分', '発注者', '袋材区分', '作業区分', '土砂数量',
+             '代価表行と数量(数率)', '選択肢の適切さ確認', '規格名計上']
+        rows = [h, ['TC-001', '回帰', '整備局', '1t土のう', '製作・設置', '10m3', '', '', ''],
+                ['TC-002', '差分', '高松市', '1t土のう', '撤去', '-', '', '', '']]
+        out = G.apply_rule_notes(rows, g)
+        got = [r for r in out[1:] if r[2] == '高松市' and r[5] not in ('', '-')]
+        self.assertEqual(len(got), 1)
+        self.assertEqual((got[0][4], got[0][5]), ('製作・設置', '6m3'))
+        self.assertIn('「土砂数量」の選択肢は「6m3」だけが表示されること', got[0][7])
+
     def test_contradiction_named(self):
         with tempfile.TemporaryDirectory() as td:
             g = G.read_gjoken(_write(td, [
